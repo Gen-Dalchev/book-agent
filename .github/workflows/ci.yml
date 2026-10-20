@@ -1,0 +1,47 @@
+name: Проверки PR
+
+# Ворота конвейера «Штаб»: каждый PR в основную ветку проходит те же
+# проверки, что агент делает перед PR. Имя «Проверки PR» не менять — по нему
+# ревьюер узнаёт, что проверки закончились. Слить красный PR не даёт набор
+# правил основной ветки (scripts/connect-project.sh в Skills_Claude, --protect).
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+# Новый пуш в тот же PR отменяет недоделанную проверку прежнего.
+concurrency:
+  group: ci-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: Тесты и сборка
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      # Нового репо без кода (PR с одними документами) проверять нечем —
+      # зелёный пропуск, а не красный провал (Magic_Fishki#1, 09.10).
+      - id: has
+        run: test -f package.json && echo app=yes >> "$GITHUB_OUTPUT" || echo "::notice::Нет package.json — проверять нечего"
+
+      - if: steps.has.outputs.app == 'yes'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      # ci, а не install: ставит ровно то, что в package-lock.json.
+      - if: steps.has.outputs.app == 'yes'
+        run: npm ci
+
+      - if: steps.has.outputs.app == 'yes'
+        run: npm test
+
+      - if: steps.has.outputs.app == 'yes'
+        run: npm run build --if-present
