@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { joinLines, removeRunningLines, removeSoftHyphens } from '../src/pdf-clean.js';
+import { bookWords, joinLines, removeRunningLines, removeSoftHyphens } from '../src/pdf-clean.js';
 import { textLines, paragraphs } from '../src/pdf-text.js';
 
 // Страница 0…100 по высоте: полоса у края — 8.
@@ -64,16 +64,54 @@ test('без краёв страницы ничего не убирается', 
   assert.deepEqual(texts(removeRunningLines(pages, [])), texts(pages));
 });
 
-test('перенос: дефис и строчная буква — склеено без дефиса, иначе дефис остаётся', () => {
-  assert.equal(joinLines('о пере-', 'носах'), 'о переносах');
-  assert.equal(joinLines('hyphen‐', 'ated'), 'hyphenated');
-  assert.equal(joinLines('Санкт-', 'Петербург'), 'Санкт- Петербург');
-  assert.equal(joinLines('стоит -', 'тире'), 'стоит - тире');
-  assert.equal(joinLines('XIX-', '1920'), 'XIX- 1920');
-  assert.equal(joinLines('кто-нибудь', 'спросит'), 'кто-нибудь спросит');
-  // Принятая ошибка: составное слово на своём дефисе.
-  assert.equal(joinLines('какой-', 'нибудь'), 'какойнибудь');
+const dictionary = (...words) => new Set(words);
+
+test('перенос: дефис и строчная буква — без дефиса, если словарь книги не пишет слово через дефис', () => {
+  assert.equal(joinLines('о пере-', 'носах', dictionary('переносах')), 'о переносах');
+  assert.equal(joinLines('о пере-', 'носах', dictionary()), 'о переносах');
+  assert.equal(joinLines('hyphen‐', 'ated', dictionary()), 'hyphenated');
+  // И слитно, и через дефис — без дефиса.
+  assert.equal(joinLines('какой-', 'нибудь', dictionary('какой-нибудь', 'какойнибудь')), 'какойнибудь');
+  // Принятая ошибка: составное слово, которое больше нигде в книге не пишется, склеено без дефиса.
+  assert.equal(joinLines('какой-', 'нибудь', dictionary()), 'какойнибудь');
   assert.equal(removeSoftHyphens('пере­нос'), 'перенос');
+});
+
+test('составное слово: через дефис есть в словаре книги, слитно нет — дефис остаётся', () => {
+  const words = dictionary('какой-нибудь', 'санкт-петербург');
+  assert.equal(joinLines('какой-', 'нибудь', words), 'какой-нибудь');
+  assert.equal(joinLines('Какой‐', 'нибудь', words), 'Какой‐нибудь');
+  // Левая часть — только буквы перед дефисом: скобка не входит.
+  assert.equal(joinLines('(какой-', 'нибудь)', words), '(какой-нибудь)');
+  assert.equal(joinLines('«какой-', 'нибудь»', words), '«какой-нибудь»');
+});
+
+test('перед прописной — дефис без пробела; левая часть капсом — по словарю', () => {
+  assert.equal(joinLines('Петров-', 'Водкин', dictionary()), 'Петров-Водкин');
+  assert.equal(joinLines('Санкт-', 'Петербург'), 'Санкт-Петербург');
+  assert.equal(joinLines('ПЕРЕ-', 'НОСАХ', dictionary('переносах')), 'ПЕРЕНОСАХ');
+  assert.equal(joinLines('ПЕРЕ-', 'НОСАХ', dictionary()), 'ПЕРЕНОСАХ');
+  assert.equal(joinLines('ПЕТРОВ-', 'ВОДКИН', dictionary('петров-водкин')), 'ПЕТРОВ-ВОДКИН');
+});
+
+test('дефис не после буквы или следующая строка не с буквы — через пробел', () => {
+  assert.equal(joinLines('стоит -', 'тире', dictionary()), 'стоит - тире');
+  assert.equal(joinLines('XIX-', '1920', dictionary()), 'XIX- 1920');
+  assert.equal(joinLines('слово-', '«цитата»', dictionary()), 'слово- «цитата»');
+  assert.equal(joinLines('слово-', '— тире', dictionary()), 'слово- — тире');
+  assert.equal(joinLines('кто-нибудь', 'спросит', dictionary()), 'кто-нибудь спросит');
+});
+
+test('словарь книги: слова не на разрыве строки, без знаков по краям и без учёта регистра', () => {
+  const words = bookWords([
+    { text: 'Кто-нибудь, (Какой-Нибудь) и пере-' },
+    { text: 'носах сказал «слово» 1924 года.' },
+    { text: 'Ещё анти‐' },
+    { text: 'фашист.' },
+  ]);
+  assert.deepEqual([...words].sort(), [
+    'года', 'ещё', 'и', 'какой-нибудь', 'кто-нибудь', 'сказал', 'слово',
+  ]);
 });
 
 test('колонтитулы убираются до разбора на абзацы: абзац через страницу не рвётся', () => {

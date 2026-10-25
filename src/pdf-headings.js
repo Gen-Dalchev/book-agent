@@ -3,7 +3,7 @@
 // Уровень — группа, у которой есть два заголовка с разным текстом на разных страницах:
 // самый крупный уровень — главы, следующий — подглавы, остальные заголовки текст не делят.
 // Пороги — здесь, в одном месте: поправить по первой настоящей книге.
-import { joinLines, removeSoftHyphens } from './pdf-clean.js';
+import { bookWords, joinLines, removeSoftHyphens } from './pdf-clean.js';
 
 // Размер входит в группу, если он меньше стольких наименьших размеров группы.
 export const SAME_SIZE = 1.05;
@@ -36,9 +36,10 @@ export const INLINE = 3;
 
 /**
  * @param {import('./pdf-text.js').Line[]} lines строки всей книги, без колонтитулов и номеров страниц
+ * @param {Set<string>} [words] словарь книги для склейки строк заголовка
  * @returns {Heading[]} по порядку; пусто — уровней нет, книга не делится
  */
-export function findHeadings(lines) {
+export function findHeadings(lines, words = bookWords(lines)) {
   const { groupOf, groupSizes } = sizeGroups(lines);
   const groups = lines.map((line) => groupOf.get(line.size));
   const mainSize = groupSizes[mainGroup(lines, groups)];
@@ -70,10 +71,10 @@ export function findHeadings(lines) {
     const run = runs[index];
     const next = runs[index + 1];
     if (run.texts.length === 1 && isNumber(run.texts[0]) && next && next.start === run.end && next.page === run.page) {
-      merged.push({ ...next, start: run.start, text: `${run.texts[0]}. ${headingText(next.texts)}` });
+      merged.push({ ...next, start: run.start, text: `${run.texts[0]}. ${headingText(next.texts, words)}` });
       index += 1;
     } else {
-      merged.push({ ...run, text: headingText(run.texts) });
+      merged.push({ ...run, text: headingText(run.texts, words) });
     }
   }
 
@@ -140,8 +141,8 @@ function isLevel(headings) {
 }
 
 // Строки заголовка склеиваются как строки абзаца; после цифры или римского номера — через «. ».
-function headingText(texts) {
-  return removeSoftHyphens(texts.reduce((text, next) => (endsWithNumber(text) ? `${text}. ${next}` : joinLines(text, next))));
+function headingText(texts, words) {
+  return removeSoftHyphens(texts.reduce((text, next) => (endsWithNumber(text) ? `${text}. ${next}` : joinLines(text, next, words))));
 }
 
 function endsWithNumber(text) {

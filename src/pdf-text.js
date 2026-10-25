@@ -5,7 +5,7 @@
 // Новый абзац — промежуток между строками больше обычного для страницы в 1,5 раза
 // или отступ первой строки. Первая строка страницы без отступа продолжает абзац
 // с прошлой страницы. Колонтитулы и номера страниц убираются до разбора на абзацы,
-// переносы склеиваются при сборке абзаца (pdf-clean.js).
+// разорванные дефисом слова склеиваются при сборке абзаца по словарю книги (pdf-clean.js).
 import { joinLines, removeRunningLines, removeSoftHyphens } from './pdf-clean.js';
 
 const GAP_FACTOR = 1.5;
@@ -94,16 +94,17 @@ function median(values) {
 }
 
 /**
- * Строки куска книги → абзацы: строки одного абзаца склеены через пробел, переносы — без дефиса.
- * Первая строка куска всегда начинает абзац.
+ * Строки куска книги → абзацы: строки одного абзаца склеены через пробел, разорванное дефисом слово —
+ * по словарю книги (joinLines). Первая строка куска всегда начинает абзац.
  * @param {Line[]} lines
+ * @param {Set<string>} [words] словарь всей книги (bookWords из pdf-clean.js)
  * @returns {string[]}
  */
-export function paragraphs(lines) {
+export function paragraphs(lines, words) {
   const result = [];
   lines.forEach((line, index) => {
     if (index === 0 || line.start) result.push(line.text);
-    else result[result.length - 1] = joinLines(result[result.length - 1], line.text);
+    else result[result.length - 1] = joinLines(result[result.length - 1], line.text, words);
   });
   return result.map(removeSoftHyphens);
 }
