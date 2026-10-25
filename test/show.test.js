@@ -1,7 +1,8 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { spawn, spawnSync } from 'node:child_process';
+import { once } from 'node:events';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -185,6 +186,21 @@ test('правило счёта: пустая строка, блок кода, �
     ['paragraph', 6, '- список\n- дальше'],
     ['paragraph', 7, '--- не разделитель'],
   ]);
+});
+
+test('вывод оборвали (… | head) — тихий выход с кодом 0, без трассы', async () => {
+  // Своя часть больше буфера канала: меньший вывод ушёл бы целиком, и обрыва не было бы.
+  const dir = path.join(tmp, 'обрыв');
+  await mkdir(path.join(dir, 'parts'), { recursive: true });
+  await writeFile(path.join(dir, 'parts', '001.md'), 'Ёжик шёл по лесу и к вечеру нашёл дорогу домой.\n\n'.repeat(15000));
+  const child = spawn(process.execPath, [SHOW, dir, '001']);
+  let stderr = '';
+  child.stderr.setEncoding('utf8');
+  child.stderr.on('data', (chunk) => { stderr += chunk; });
+  child.stdout.once('data', () => child.stdout.destroy());
+  const [code] = await once(child, 'close');
+  assert.equal(stderr, '');
+  assert.equal(code, 0);
 });
 
 test('разбор ссылки', () => {

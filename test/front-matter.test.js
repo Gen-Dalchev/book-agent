@@ -252,6 +252,33 @@ test('выходные данные imprint (как у Standard Ebooks) — «р
   assert.deepEqual(all.titles, ['| 001 | Imprint', '| 002 | Глава первая']);
 });
 
+test('полутитул halftitlepage (как у Standard Ebooks) — «разметка: halftitlepage», с --all — часть', async () => {
+  const book = {
+    items: [
+      // С названием книги прежде пропускался по признакам титула, с другим текстом — становился главой.
+      page('half', 'halftitle.xhtml', '<section epub:type="halftitlepage"><h2>Тестовая книга</h2></section>'),
+      page('half2', 'halftitle2.xhtml', '<section epub:type="halftitlepage"><h2>Часть первая</h2></section>'),
+      CHAPTER_ONE,
+      CHAPTER_TWO,
+    ],
+    spine: ['half', 'half2', 'ch1', 'ch2'],
+  };
+  const { skipped, titles, parts } = await importBook('halftitle', book);
+  assert.deepEqual(skipped, [
+    '| OEBPS/halftitle.xhtml | Тестовая книга | разметка: halftitlepage |',
+    '| OEBPS/halftitle2.xhtml | Часть первая | разметка: halftitlepage |',
+  ]);
+  assert.deepEqual(titles, ['| 001 | Глава первая', '| 002 | Глава вторая']);
+  assert.deepEqual(parts, ['001.md', '002.md']);
+
+  const out = path.join(tmp, 'halftitle-all');
+  await importEpub(await writeBook('halftitle-all', book), out, { all: true });
+  const all = await readBook(out);
+  assert.equal(all.skipped, null);
+  assert.deepEqual(all.titles,
+    ['| 001 | Тестовая книга', '| 002 | Часть первая', '| 003 | Глава первая', '| 004 | Глава вторая']);
+});
+
 test('все документы пустые — ошибка «все файлы в порядке чтения пустые», папка не создаётся', async () => {
   const input = await writeBook('all-empty', {
     items: [page('img', 'cover.xhtml', '<img src="cover.png" alt="Обложка"/>'), page('blank', 'blank.xhtml', '<hr/>')],

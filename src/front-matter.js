@@ -25,7 +25,7 @@ export const REASONS = {
 };
 
 // epub:type у body или верхнего section и типы в landmarks (EPUB 3).
-const MARKUP_TYPES = new Set(['cover', 'titlepage', 'copyright-page', 'toc', 'colophon', 'imprint']);
+const MARKUP_TYPES = new Set(['cover', 'halftitlepage', 'titlepage', 'copyright-page', 'toc', 'colophon', 'imprint']);
 // Типы <reference> в <guide> (EPUB 2).
 const GUIDE_TYPES = new Set(['cover', 'title-page', 'copyright-page', 'toc']);
 
