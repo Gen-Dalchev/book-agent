@@ -12,13 +12,13 @@ import { TextNode } from 'node-html-parser';
 import { resolveHref } from './epub.js';
 import { ELEMENT, TEXT, HEADING_LEVELS, SKIP, BLOCK, tagOf } from './html-tags.js';
 
-const MARK_OPEN = '';
-const MARK_CLOSE = '';
+const MARK_OPEN = '\uE000';
+const MARK_CLOSE = '\uE001';
 const DIGIT_BASE = 0xe010;
 // Пробелы перед меткой (в том числе неразрывные, но не перенос строки) в текст не идут.
-const MARK = /([^\S\n]*)([-]+)/g;
+const MARK = /([^\S\n]*)\uE000([\uE010-\uE019]+)\uE001/g;
 
-const SIGN = /^(\[\d{1,3}\]|\d{1,3}|\*{1,3}|†|‡)$/;
+const SIGN = /^(\[\d{1,3}\]|\d{1,3}[.)]?|\*{1,3}|†|‡)$/;
 const NOTE_BLOCKS = new Set(['p', 'li', 'dd', 'aside', 'div', 'section']);
 const WRAPPERS = new Set(['section', 'div', 'aside', 'footer', 'ol', 'ul']);
 const URL_SCHEME = /^[a-z][a-z0-9+.-]*:/i;
@@ -216,10 +216,10 @@ function linkText(link) {
   return link.text.replace(/\s+/g, '');
 }
 
-// Знак сноски без скобок: «[1]» → «1». Слова («примечание») знаком не считаются.
+// Знак сноски без скобок и точки: «[1]», «1)», «1.» → «1». Слова («примечание») знаком не считаются.
 function signOf(link) {
   const text = linkText(link);
-  return SIGN.test(text) ? text.replace(/[[\]]/g, '') : '';
+  return SIGN.test(text) ? text.replace(/[[\]]/g, '').replace(/^(\d+)[.)]$/, '$1') : '';
 }
 
 // Место сноски в тексте: непустой строчный элемент, перед которым в его блоке есть текст.
