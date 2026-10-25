@@ -1,6 +1,7 @@
-// Сноски внутри главы: ссылка на примечание в том же документе становится меткой
-// в тексте, а само примечание уходит из текста главы и ложится определением в конец
-// части. Признаки сноски и обратной ссылки — по задаче #16 (решение Б-07).
+// Сноски: ссылка на примечание в том же документе или в другом документе книги
+// (отдельный файл примечаний) становится меткой в тексте, а само примечание уходит
+// из своего документа и ложится определением в конец части, где метка. Признаки
+// сноски и обратной ссылки — по задаче #16 (решение Б-07), другой файл — по #26.
 //
 // Разбор идёт по дереву документа до превращения в блоки: он правит дерево
 // (ссылка → метка, примечание вырезано) и отдаёт тексты примечаний. Метка в тексте
@@ -65,66 +66,120 @@ export function numberMarks(texts, notes) {
  * @returns {{notes: string[]}} тексты сносок; номер сноски — индекс
  */
 export function extractFootnotes(body, { href = null, render }) {
-  const elements = descendants(body);
-  const ids = new Map();
-  for (const element of elements) {
-    const id = element.getAttribute('id');
-    if (id && !ids.has(id)) ids.set(id, element);
-    const name = tagOf(element) === 'a' ? element.getAttribute('name') : null;
-    if (name && !ids.has(name)) ids.set(name, element);
+  return { notes: extractBookFootnotes([{ href, body }], { render })[0].notes };
+}
+
+/**
+ * То же для всех документов книги разом (задача #26): цель сноски может лежать
+ * в другом документе — отдельном файле примечаний. Сначала собираются кандидаты
+ * по всем документам, потом вырезаются примечания: ссылка внутри примечания,
+ * которое уйдёт из любого документа, не разбирается.
+ * @param {{href: string | null, body: import('node-html-parser').HTMLElement}[]} documents в порядке чтения
+ * @param {object} options
+ * @param {(element: import('node-html-parser').HTMLElement, hidden: Set<object>) => string} options.render
+ * @param {Set<string>} [options.closed] служебные документы: ссылка в них из другого документа — не сноска
+ * @returns {{notes: string[], notesFile: boolean}[]} по документу: тексты его сносок (номер — индекс);
+ *   notesFile — из документа вырезано примечание по сноске из другого документа
+ */
+export function extractBookFootnotes(documents, { render, closed = new Set() }) {
+  const docs = documents.map(({ href, body }, index) => {
+    const elements = descendants(body);
+    const ids = new Map();
+    for (const element of elements) {
+      const id = element.getAttribute('id');
+      if (id && !ids.has(id)) ids.set(id, element);
+      const name = tagOf(element) === 'a' ? element.getAttribute('name') : null;
+      if (name && !ids.has(name)) ids.set(name, element);
+    }
+    const links = elements.filter((element) => tagOf(element) === 'a' && element.getAttribute('href'));
+    return { index, href, ids, links, notes: [], idOf: new Map(), notesFile: false };
+  });
+  const byHref = new Map();
+  for (const doc of docs) {
+    if (doc.href !== null && !byHref.has(doc.href)) byHref.set(doc.href, doc);
   }
 
-  const targetOf = (link) => {
-    const fragment = fragmentOf(link.getAttribute('href'), href);
-    const target = fragment === null ? undefined : ids.get(fragment);
-    return target === link ? undefined : target;
+  // Документ и id, куда ведёт ссылка: свой документ, другой из порядка чтения или никуда.
+  const pointOf = (link, doc) => {
+    const value = link.getAttribute('href');
+    const hash = value.indexOf('#');
+    if (hash === -1) return null;
+    const file = value.slice(0, hash);
+    let to = doc;
+    if (file !== '') {
+      if (doc.href === null || URL_SCHEME.test(file)) return null;
+      const resolved = resolveHref(path.posix.dirname(doc.href), file);
+      to = resolved === doc.href ? doc : byHref.get(resolved);
+      if (!to) return null;
+    }
+    return { doc: to, fragment: decodeFragment(value.slice(hash + 1)) };
+  };
+  const targetOf = (link, doc) => {
+    const point = pointOf(link, doc);
+    const target = point?.fragment ? point.doc.ids.get(point.fragment) : undefined;
+    return target && target !== link ? { doc: point.doc, target } : null;
   };
 
-  // Сначала все обратные ссылки: из текста примечания они убираются.
-  const links = elements.filter((element) => tagOf(element) === 'a' && element.getAttribute('href'));
-  const backlinks = new Set(links.filter((link) => {
-    const target = targetOf(link);
-    return hasWord(link, 'epub:type', 'backlink') || hasWord(link, 'role', 'doc-backlink')
-      || (target && isPlace(target));
-  }));
+  // Сначала все обратные ссылки: из текста примечания они убираются. Для каждой
+  // запомнен документ, куда она ведёт.
+  const backlinks = new Map();
+  for (const doc of docs) {
+    for (const link of doc.links) {
+      const found = targetOf(link, doc);
+      if (hasWord(link, 'epub:type', 'backlink') || hasWord(link, 'role', 'doc-backlink')
+        || (found && isPlace(found.target))) {
+        backlinks.set(link, pointOf(link, doc)?.doc ?? null);
+      }
+    }
+  }
+  const hidden = new Set(backlinks.keys());
+  // Примечание в другом документе, найденное через якорь в начале блока, должно
+  // вести обратно: иначе это абзац главы, а не примечание.
+  const leadsBack = (note, doc) => descendants(note).some((element) => backlinks.get(element) === doc);
 
   const candidates = [];
   const rawTexts = new Map();
-  for (const link of links) {
-    const target = targetOf(link);
-    if (backlinks.has(link) || !target || !isNoteref(link) || insideSkipped(link)) continue;
-    const note = noteOf(target);
-    if (!note || !isAcceptable(note, link)) continue;
-    if (!rawTexts.has(note)) rawTexts.set(note, noteText(render(note, backlinks)));
-    const sign = signOf(link);
-    const text = stripSign(rawTexts.get(note), sign) || rawTexts.get(note);
-    if (!text) continue;
-    candidates.push({ link, note, text });
+  for (const doc of docs) {
+    for (const link of doc.links) {
+      if (backlinks.has(link) || !isNoteref(link) || insideSkipped(link)) continue;
+      const found = targetOf(link, doc);
+      if (!found) continue;
+      const other = found.doc !== doc;
+      if (other && closed.has(found.doc.href)) continue;
+      const note = noteOf(found.target);
+      if (!note || !isAcceptable(note, link)) continue;
+      if (other && note !== found.target && !leadsBack(note, doc)) continue;
+      if (!rawTexts.has(note)) rawTexts.set(note, noteText(render(note, hidden)));
+      const sign = signOf(link);
+      const text = stripSign(rawTexts.get(note), sign) || rawTexts.get(note);
+      if (!text) continue;
+      candidates.push({ doc, link, note, noteDoc: found.doc, text });
+    }
   }
 
   // Ссылка внутри примечания, которое уйдёт из текста, не разбирается: её текст остаётся.
   const cut = new Set(candidates.map((candidate) => candidate.note));
   const accepted = candidates.filter(({ link }) => !hasAncestorIn(link, cut));
 
-  const notes = [];
-  const idOf = new Map();
-  for (const { link, note, text } of accepted) {
-    if (!idOf.has(note)) {
-      idOf.set(note, notes.length);
-      notes.push(text);
+  // Номера сносок — свои в каждом документе: одно примечание из двух глав — в каждой своё.
+  for (const { doc, link, note, noteDoc, text } of accepted) {
+    if (!doc.idOf.has(note)) {
+      doc.idOf.set(note, doc.notes.length);
+      doc.notes.push(text);
     }
-    link.set_content(new TextNode(markFor(idOf.get(note)), link));
+    link.set_content(new TextNode(markFor(doc.idOf.get(note)), link));
+    if (noteDoc !== doc) noteDoc.notesFile = true;
   }
 
   const marked = new Set(accepted.map((candidate) => candidate.link));
   const parents = [];
-  for (const note of idOf.keys()) {
+  for (const note of new Set(accepted.map((candidate) => candidate.note))) {
     if (!note.parentNode) continue;
     parents.push(note.parentNode);
     note.remove();
   }
   for (const parent of parents) cutEmptyWrappers(parent, marked);
-  return { notes };
+  return docs.map(({ notes, notesFile }) => ({ notes, notesFile }));
 }
 
 function descendants(root) {
@@ -140,23 +195,12 @@ function descendants(root) {
   return out;
 }
 
-// href="#id" или "этот-файл.xhtml#id" → id; ссылка на другой файл или без фрагмента → null.
-function fragmentOf(link, docHref) {
-  if (!link) return null;
-  const hash = link.indexOf('#');
-  if (hash === -1) return null;
-  const file = link.slice(0, hash);
-  if (file !== '') {
-    if (docHref === null || URL_SCHEME.test(file)) return null;
-    if (resolveHref(path.posix.dirname(docHref), file) !== docHref) return null;
-  }
-  let fragment = link.slice(hash + 1);
+function decodeFragment(fragment) {
   try {
-    fragment = decodeURIComponent(fragment);
+    return decodeURIComponent(fragment);
   } catch {
-    // не закодировано — берём как есть
+    return fragment; // не закодировано — берём как есть
   }
-  return fragment || null;
 }
 
 function hasWord(element, attribute, word) {

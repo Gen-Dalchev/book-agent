@@ -1,13 +1,17 @@
-// Импорт EPUB целиком: прочитать архив → отложить служебные страницы → нарезать
-// на части → записать папку книги. Всё проверяется до записи: при ошибке папка не создаётся.
+// Импорт EPUB целиком: прочитать архив → отложить служебные страницы → разобрать
+// сноски по всей книге → нарезать на части → записать папку книги. Всё проверяется до записи: при ошибке папка не создаётся.
 import { readEpub } from './epub.js';
 import { readInput } from './input.js';
-import { htmlToBlocks } from './html-to-blocks.js';
+import { blocksWithoutFootnotes, documentsToBlocks, htmlToBlocks } from './html-to-blocks.js';
 import { buildChapters, fallbackTitle } from './chapters.js';
 import { frontMatterReasons } from './front-matter.js';
 import { planBook } from './layout.js';
 import { ensureEmptyDir, writeFiles } from './write.js';
 import { ImportError } from './errors.js';
+
+const HAS_TEXT = /[\p{L}\p{N}]/u;
+// Причина в «Пропущено» для файла примечаний, из которого всё разнесено по частям.
+export const NOTES_REASON = 'примечания — разнесены по частям';
 
 /**
  * @param {string} inputPath файл .epub
@@ -28,15 +32,28 @@ export async function importEpub(inputPath, outDir, options = {}) {
  */
 export async function importEpubData(data, outDir, { all = false } = {}) {
   const book = await readEpub(data);
-  const documents = book.documents.map((doc) => ({ ...doc, ...htmlToBlocks(doc.html, { href: doc.href }) }));
-  const reasons = all ? documents.map(() => null) : frontMatterReasons({ ...book, documents });
+  // Служебные страницы — по каждому документу отдельно, со сносками только внутри
+  // своего файла (#16). Ссылка в служебную страницу — не сноска, даже с --all.
+  const single = book.documents.map((doc) => ({ ...doc, ...htmlToBlocks(doc.html, { href: doc.href }) }));
+  const reasons = frontMatterReasons({ ...book, documents: single });
+  const closed = new Set(single.filter((_doc, index) => reasons[index]).map((doc) => doc.href));
+  const documents = documentsToBlocks(book.documents, { closed });
 
   const kept = [];
   const skipped = [];
-  documents.forEach((doc, index) => {
-    const reason = reasons[index];
-    if (reason) skipped.push({ file: doc.href, start: fallbackTitle(doc.blocks), reason });
-    else kept.push(doc);
+  book.documents.forEach(({ href, html }, index) => {
+    const doc = documents[index];
+    const reason = all ? null : reasons[index];
+    if (reason) {
+      skipped.push({ file: href, start: fallbackTitle(single[index].blocks), reason });
+    } else if (doc.notesFile && !hasText(doc.blocks)) {
+      // Первые слова — до вырезания примечаний: после него блоков может не остаться.
+      const before = blocksWithoutFootnotes(html);
+      const start = before.some((block) => HAS_TEXT.test(block.text)) ? fallbackTitle(before) : '';
+      skipped.push({ file: href, start, reason: NOTES_REASON });
+    } else {
+      kept.push(doc);
+    }
   });
 
   const chapters = buildChapters(kept);
@@ -49,4 +66,9 @@ export async function importEpubData(data, outDir, { all = false } = {}) {
   const plan = planBook({ metadata: book.metadata, chapters, skipped });
   await writeFiles(outDir, plan.files);
   return { title: book.metadata.title, chapterCount: plan.chapterCount, partCount: plan.partCount };
+}
+
+// Остался ли текст, кроме заголовков и <hr>: файл примечаний без него частью не становится.
+function hasText(blocks) {
+  return blocks.some((block) => block.type === 'text' && HAS_TEXT.test(block.text));
 }
