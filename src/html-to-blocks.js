@@ -180,10 +180,13 @@ function collapse(text) {
   return text.replace(HTML_SPACE, ' ');
 }
 
+// Внутри блока пустых строк нет: пустая строка делит абзацы (Б-04), а один абзац
+// исходника — один ¶. Поэтому <br><br> и строфы в одном <p> — один перенос; пустой
+// считается и строка из одних пробелов, в том числе неразрывных.
 function cleanInline(text) {
   return text
     .replace(/ *\n */g, '\n')
-    .replace(/\n{3,}/g, '\n\n')
+    .replace(/\n(?:[^\S\n]*\n)+/g, '\n')
     .replace(/ {2,}/g, ' ')
     .replace(EDGE_SPACE, '');
 }
