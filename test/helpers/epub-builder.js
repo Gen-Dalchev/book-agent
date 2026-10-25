@@ -26,8 +26,9 @@ ${body}
  * @param {'2.0' | '3.0'} [book.version]
  * @param {string} [book.metadata] XML, дописываемый в <metadata> как есть
  * @param {string} [book.guide] содержимое <guide> (EPUB 2) — XML как есть
+ * @param {string} [book.toc] id файла NCX в манифесте — атрибут spine@toc (EPUB 2)
  */
-export async function buildEpub({ title, author, language, items, spine, version = '3.0', metadata = '', guide }) {
+export async function buildEpub({ title, author, language, items, spine, version = '3.0', metadata = '', guide, toc }) {
   const zip = new JSZip();
   zip.file('mimetype', 'application/epub+zip', { compression: 'STORE' });
   zip.file('META-INF/container.xml', `<?xml version="1.0" encoding="UTF-8"?>
@@ -57,11 +58,41 @@ ${metadata}
   <manifest>
 ${manifest}
   </manifest>
-  <spine>
+  <spine${toc === undefined ? '' : ` toc="${toc}"`}>
 ${itemrefs}
   </spine>
 ${guide === undefined ? '' : `  <guide>\n${guide}\n  </guide>\n`}</package>
 `);
   for (const item of items) zip.file(`OEBPS/${item.href}`, item.content);
   return zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
+}
+
+/**
+ * Пункт оглавления для navDocument и ncxDocument: без href — <span> (в NCX — без <content>).
+ * @typedef {{title: string, href?: string, children?: TocEntry[]}} TocEntry
+ */
+
+/** Документ навигации EPUB 3 с <nav epub:type="toc">; extra — ещё разметка в body (landmarks). */
+export function navDocument(entries, extra = '') {
+  const list = (items) => `<ol>${items.map((item) => `<li>${item.href === undefined
+    ? `<span>${item.title}</span>` : `<a href="${item.href}">${item.title}</a>`}${
+    item.children?.length ? list(item.children) : ''}</li>`).join('')}</ol>`;
+  return xhtml(`<nav epub:type="toc"><h1>Contents</h1>${list(entries)}</nav>${extra}`, 'Contents');
+}
+
+/** NCX (EPUB 2) с тем же деревом пунктов. */
+export function ncxDocument(entries) {
+  let order = 0;
+  const points = (items) => items.map((item) => {
+    order += 1;
+    return `<navPoint id="p${order}" playOrder="${order}"><navLabel><text>${item.title}</text></navLabel>${
+      item.href === undefined ? '' : `<content src="${item.href}"/>`}${points(item.children ?? [])}</navPoint>`;
+  }).join('');
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1">
+  <head><meta name="dtb:uid" content="test-book"/></head>
+  <docTitle><text>Книга</text></docTitle>
+  <navMap>${points(entries)}</navMap>
+</ncx>
+`;
 }
