@@ -17,9 +17,9 @@ const CODE = new Set(['code', 'kbd', 'samp', 'tt']);
 const HTML_SPACE = /[ \t\n\r\f]+/g;
 const EDGE_SPACE = /^[ \t\n\r\f]+|[ \t\n\r\f]+$/g;
 
-// Узлы, которые нужно пропустить при выводе: обратные ссылки внутри примечания.
+// Узлы, которые нужно пропустить при выводе (обратные ссылки внутри примечания):
+// вне примечаний — никаких.
 const NOTHING = new Set();
-let hidden = NOTHING;
 
 /**
  * @param {string} html
@@ -69,13 +69,8 @@ function bodyBlocks(body) {
   return blocks;
 }
 
-function renderHiding(element, nodes) {
-  hidden = nodes;
-  try {
-    return renderChildren(element);
-  } finally {
-    hidden = NOTHING;
-  }
+function renderHiding(element, hidden) {
+  return renderChildren(element, {}, hidden);
 }
 
 function collectBlocks(element, out) {
@@ -178,28 +173,28 @@ function tableRows(table) {
   return rows;
 }
 
-function renderInline(node, style = {}) {
+function renderInline(node, style = {}, hidden = NOTHING) {
   if (node.nodeType === TEXT) return collapse(node.text);
   if (node.nodeType !== ELEMENT) return '';
   const tag = tagOf(node);
   if (SKIP.has(tag) || hidden.has(node)) return '';
   if (tag === 'br') return '\n';
   if (ITALIC.has(tag) && !style.italic) {
-    return wrap(renderChildren(node, { ...style, italic: true }), '*');
+    return wrap(renderChildren(node, { ...style, italic: true }, hidden), '*');
   }
   if (BOLD.has(tag) && !style.bold) {
-    return wrap(renderChildren(node, { ...style, bold: true }), '**');
+    return wrap(renderChildren(node, { ...style, bold: true }, hidden), '**');
   }
   if (CODE.has(tag) && !style.code) {
-    return wrap(renderChildren(node, { ...style, code: true }), '`');
+    return wrap(renderChildren(node, { ...style, code: true }, hidden), '`');
   }
   // Блочный элемент внутри строки (абзац в заголовке, в ячейке) — через пробел.
-  if (BLOCK.has(tag)) return ` ${renderChildren(node, style)} `;
-  return renderChildren(node, style);
+  if (BLOCK.has(tag)) return ` ${renderChildren(node, style, hidden)} `;
+  return renderChildren(node, style, hidden);
 }
 
-function renderChildren(element, style = {}) {
-  return element.childNodes.map((child) => renderInline(child, style)).join('');
+function renderChildren(element, style = {}, hidden = NOTHING) {
+  return element.childNodes.map((child) => renderInline(child, style, hidden)).join('');
 }
 
 // Пробелы по краям выносятся за маркеры: «* слово *» markdown не поймёт.

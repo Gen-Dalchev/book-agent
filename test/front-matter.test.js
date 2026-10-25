@@ -161,6 +161,7 @@ const PLAIN_BOOK = {
 test('без разметки: титул, выходные данные и оглавление — по признакам', async () => {
   const { index, skipped, titles, parts } = await importBook('plain', PLAIN_BOOK);
   assert.deepEqual(skipped, [
+    '| OEBPS/cover.xhtml |  | нет текста |',
     '| OEBPS/title.xhtml | Автор Тестов | признаки: титул |',
     '| OEBPS/rights.xhtml | Выходные данные этого издания и несколько слов о… | признаки: выходные данные |',
     '| OEBPS/contents.xhtml | Содержание | признаки: оглавление |',
@@ -180,15 +181,14 @@ test('без разметки: титул, выходные данные и ог
   assert.match(index, /\n## Пропущено\n\n\| Файл \| Начало \| Причина \|\n\| --- \| --- \| --- \|\n/);
 });
 
-test('--all в любом месте — пропусков нет, пустые страницы по-прежнему не части', async () => {
+test('--all в любом месте — служебных пропусков нет, пустая страница не часть и видна в «Пропущено»', async () => {
   const input = await writeBook('plain-all', PLAIN_BOOK);
   for (const [name, args] of [['all-end', (out) => [input, out, '--all']], ['all-start', (out) => ['--all', input, out]]]) {
     const out = path.join(tmp, name);
     const result = runCli(...args(out));
     assert.equal(result.status, 0, result.stderr);
-    const { index, skipped, titles } = await readBook(out);
-    assert.equal(skipped, null);
-    assert.doesNotMatch(index, /Пропущено/);
+    const { skipped, titles } = await readBook(out);
+    assert.deepEqual(skipped, ['| OEBPS/cover.xhtml |  | нет текста |']);
     assert.deepEqual(titles.slice(0, 4), [
       '| 001 | Автор Тестов',
       '| 002 | Выходные данные этого издания и несколько слов о…',
@@ -197,6 +197,71 @@ test('--all в любом месте — пропусков нет, пустые
     ]);
     assert.equal(titles.length, 10);
   }
+});
+
+test('документ без текста между главами — в «Пропущено» «нет текста», номера глав не сдвинуты; с --all так же', async () => {
+  const book = {
+    items: [
+      CHAPTER_ONE,
+      page('picture', 'picture.xhtml', '<p><img src="map.png" alt="Карта"/></p>'),
+      page('blank', 'blank.xhtml', ''),
+      page('rule', 'rule.xhtml', '<hr/>'),
+      CHAPTER_TWO,
+    ],
+    spine: ['ch1', 'picture', 'blank', 'rule', 'ch2'],
+  };
+  const input = await writeBook('empty-docs', book);
+  for (const [name, options] of [['empty-docs', {}], ['empty-docs-all', { all: true }]]) {
+    const out = path.join(tmp, name);
+    await importEpub(input, out, options);
+    const { skipped, titles, parts } = await readBook(out);
+    assert.deepEqual(skipped, [
+      '| OEBPS/picture.xhtml |  | нет текста |',
+      '| OEBPS/blank.xhtml |  | нет текста |',
+      '| OEBPS/rule.xhtml |  | нет текста |',
+    ], name);
+    assert.deepEqual(titles, ['| 001 | Глава первая', '| 002 | Глава вторая'], name);
+    assert.deepEqual(parts, ['001.md', '002.md'], name);
+  }
+});
+
+test('обложка по разметке из одной картинки — «нет текста», а не «разметка: cover»', async () => {
+  const { skipped } = await importBook('cover-image', {
+    items: [typedBody('cover', 'cover.xhtml', '<img src="cover.png" alt="Обложка"/>', 'cover'), CHAPTER_ONE],
+    spine: ['cover', 'ch1'],
+  });
+  assert.deepEqual(skipped, ['| OEBPS/cover.xhtml |  | нет текста |']);
+});
+
+test('выходные данные imprint (как у Standard Ebooks) — «разметка: imprint», с --all — часть', async () => {
+  const book = {
+    items: [
+      page('imprint', 'imprint.xhtml', '<section epub:type="imprint"><h2>Imprint</h2><p>Издано своими силами.</p></section>'),
+      CHAPTER_ONE,
+    ],
+    spine: ['imprint', 'ch1'],
+  };
+  const { skipped, titles } = await importBook('imprint', book);
+  assert.deepEqual(skipped, ['| OEBPS/imprint.xhtml | Imprint | разметка: imprint |']);
+  assert.deepEqual(titles, ['| 001 | Глава первая']);
+
+  const out = path.join(tmp, 'imprint-all');
+  await importEpub(await writeBook('imprint-all', book), out, { all: true });
+  const all = await readBook(out);
+  assert.equal(all.skipped, null);
+  assert.deepEqual(all.titles, ['| 001 | Imprint', '| 002 | Глава первая']);
+});
+
+test('все документы пустые — ошибка «все файлы в порядке чтения пустые», папка не создаётся', async () => {
+  const input = await writeBook('all-empty', {
+    items: [page('img', 'cover.xhtml', '<img src="cover.png" alt="Обложка"/>'), page('blank', 'blank.xhtml', '<hr/>')],
+    spine: ['img', 'blank'],
+  });
+  const out = path.join(tmp, 'all-empty');
+  const result = runCli(input, out);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /Ошибка: В книге не нашлось текста: все файлы в порядке чтения пустые\./);
+  assert.equal(existsSync(out), false);
 });
 
 test('ничего не пропущено — раздела «Пропущено» нет', async () => {

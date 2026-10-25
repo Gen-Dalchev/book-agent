@@ -12,6 +12,9 @@ import { ImportError } from './errors.js';
 const HAS_TEXT = /[\p{L}\p{N}]/u;
 // Причина в «Пропущено» для файла примечаний, из которого всё разнесено по частям.
 export const NOTES_REASON = 'примечания — разнесены по частям';
+// Причина для документа без текста (обложка-картинка, пустой body, один <hr>): частью
+// он не становится и с --all, но виден при сверке с файлом книги.
+export const EMPTY_REASON = 'нет текста';
 
 /**
  * @param {string} inputPath файл .epub
@@ -51,13 +54,15 @@ export async function importEpubData(data, outDir, { all = false } = {}) {
       const before = blocksWithoutFootnotes(html);
       const start = before.some((block) => HAS_TEXT.test(block.text)) ? fallbackTitle(before) : '';
       skipped.push({ file: href, start, reason: NOTES_REASON });
+    } else if (!doc.blocks.some((block) => HAS_TEXT.test(block.text))) {
+      skipped.push({ file: href, start: '', reason: EMPTY_REASON });
     } else {
       kept.push(doc);
     }
   });
 
   const chapters = buildChapters(kept);
-  if (chapters.length === 0 && skipped.length > 0) {
+  if (chapters.length === 0 && skipped.some((page) => page.reason !== EMPTY_REASON)) {
     throw new ImportError('В книге не нашлось текста: все страницы — служебные (обложка, титул, выходные данные, оглавление). Чтобы взять всё, добавьте --all.');
   }
   if (chapters.length === 0) {

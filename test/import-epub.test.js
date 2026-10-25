@@ -94,6 +94,8 @@ test('книга раскладывается на book.md и части в по
   assert.match(index, /^\| 002 \| Chapter One \| parts\/002\.md \| 18 \|$/m);
   const order = ['| 001 ', '| 001-00 ', '| 001-01 ', '| 001-02 ', '| 002 '].map((row) => index.indexOf(row));
   assert.deepEqual(order, [...order].sort((a, b) => a - b));
+  // Обложка-картинка и пустая глава частями не стали, но видны — по порядку чтения.
+  assert.match(index, /\n## Пропущено\n\n\| Файл \| Начало \| Причина \|\n\| --- \| --- \| --- \|\n\| OEBPS\/cover\.xhtml \| {2}\| нет текста \|\n\| OEBPS\/m-empty\.xhtml \| {2}\| нет текста \|\n$/);
 });
 
 test('текст частей — markdown, посимвольно как в исходнике, без HTML', async () => {
