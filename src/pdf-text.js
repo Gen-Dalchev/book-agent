@@ -14,8 +14,9 @@ const INDENT_EM = 0.8;
 
 /**
  * @typedef {{str: string, transform: number[], height?: number, hasEOL?: boolean}} TextItem
- * @typedef {{page: number, x: number, y: number, height: number, text: string, start: boolean}} Line
- *   page — с 0; y — снизу вверх, как в PDF; start — строка начинает абзац
+ * @typedef {{page: number, x: number, y: number, height: number, size: number, text: string, start: boolean}} Line
+ *   page — с 0; y — снизу вверх, как в PDF; height — наибольшая высота куска строки;
+ *   size — размер, которым набрано больше всего букв строки; start — строка начинает абзац
  */
 
 /**
@@ -51,18 +52,34 @@ function splitLines(items) {
       const height = item.height || Math.abs(item.transform[3]) || 0;
       const sameLine = current && !broken && Math.abs(y - current.y) <= Math.max(current.height, height) / 2;
       if (!sameLine) {
-        current = { x: item.transform[4], y, height, text: '' };
+        current = { x: item.transform[4], y, height, text: '', letters: new Map() };
         lines.push(current);
       }
       current.height = Math.max(current.height, height);
+      const letters = item.str.replace(/\s+/gu, '').length;
+      current.letters.set(height, (current.letters.get(height) ?? 0) + letters);
       broken = false;
     }
     if (current) current.text += item.str;
     if (item.hasEOL) broken = true;
   }
   return lines
-    .map((line) => ({ ...line, text: line.text.replace(/\s+/gu, ' ').trim() }))
+    .map(({ letters, ...line }) => ({ ...line, size: lineSize(letters), text: line.text.replace(/\s+/gu, ' ').trim() }))
     .filter((line) => line.text);
+}
+
+// Размер строки — тот, которым набрано больше всего букв строки; при равенстве — меньший.
+// Так поднятая буквица не делает строку крупной.
+function lineSize(letters) {
+  let size = 0;
+  let most = -1;
+  for (const [height, count] of letters) {
+    if (count > most || (count === most && height < size)) {
+      size = height;
+      most = count;
+    }
+  }
+  return size;
 }
 
 function gaps(lines) {

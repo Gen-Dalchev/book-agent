@@ -121,6 +121,151 @@ test('PDF без закладок — одна глава «Текст» и пр
   assert.match(index, /^# Plain\n\n- Автор: не указан\n/);
 });
 
+// Главы по крупному шрифту. Основной текст — 12 (по умолчанию), его в книге больше всего;
+// заголовок — не мельче 1,2 × 12 = 14,4, поэтому подглавы — 15.
+const para = (text) => ({ text, indent: true });
+const big = (text, size) => ({ text, size });
+const BODY = para('Body text, long enough to be the main size.');
+
+async function importHeadings(name, pages, bookmarks) {
+  const input = await pdfFile(`${name}.pdf`, { title: 'Sized', pages, bookmarks });
+  const out = path.join(tmp, name);
+  const result = runImport(input, out);
+  assert.equal(result.status, 0, result.stderr);
+  return { out, result, files: await readdir(path.join(out, 'parts')) };
+}
+
+test('PDF без закладок: главы и подглавы по крупному шрифту, предупреждение, оглавление', async () => {
+  const { out, result, files } = await importHeadings('font-headings', [
+    [big('Chapter One', 18), para('Intro text of the first chapter.'),
+      big('First Section', 15), para('Body of the first section, a few words.')],
+    [big('Second Section', 15), para('Body of the second section, a few words.')],
+    [big('Chapter Two', 18), para('The second chapter has no sections at all.')],
+  ]);
+  assert.match(result.stderr,
+    /в PDF нет закладок — главы размечены по крупному шрифту, проверьте оглавление в book\.md/);
+  assert.doesNotMatch(result.stderr, /главы не размечены/);
+  assert.match(result.stdout, /глав: 2, частей: 4\./);
+  assert.deepEqual(files, ['001-00.md', '001-01.md', '001-02.md', '002.md']);
+  assert.equal(await read(out, 'parts/001-00.md'), '# Chapter One\n\nIntro text of the first chapter.\n');
+  assert.equal(await read(out, 'parts/001-01.md'), '## First Section\n\nBody of the first section, a few words.\n');
+  assert.equal(await read(out, 'parts/001-02.md'), '## Second Section\n\nBody of the second section, a few words.\n');
+  assert.equal(await read(out, 'parts/002.md'), '# Chapter Two\n\nThe second chapter has no sections at all.\n');
+  const index = await read(out, 'book.md');
+  assert.match(index, /^\| 001 \| Chapter One \| — \| \d+ \|$/mu);
+  assert.match(index, /^\| 001-01 \| First Section \| parts\/001-01\.md \| \d+ \|$/mu);
+  assert.match(index, /^\| 001-02 \| Second Section \| parts\/001-02\.md \| \d+ \|$/mu);
+  assert.match(index, /^\| 002 \| Chapter Two \| parts\/002\.md \| \d+ \|$/mu);
+});
+
+test('заголовок в две строки: после номера — через «. », иначе через пробел', async () => {
+  const { out, files } = await importHeadings('two-line-headings', [
+    [big('Chapter 1', 18), big('Beginning', 18), BODY],
+    [big('A Rather Long Chapter', 18), big('Title in Two Lines', 18), BODY],
+  ]);
+  assert.deepEqual(files, ['001.md', '002.md']);
+  assert.match(await read(out, 'parts/001.md'), /^# Chapter 1\. Beginning\n\nBody text/);
+  assert.match(await read(out, 'parts/002.md'), /^# A Rather Long Chapter Title in Two Lines\n\nBody text/);
+});
+
+test('номер главы отдельной строкой крупнее названия — одна глава «1. Beginning»', async () => {
+  const { out, files } = await importHeadings('number-line', [
+    [big('1', 36), big('Beginning', 18), BODY],
+    [big('2', 36), big('Middle', 18), BODY],
+  ]);
+  assert.deepEqual(files, ['001.md', '002.md']);
+  assert.match(await read(out, 'parts/001.md'), /^# 1\. Beginning\n\nBody text[^#]*$/);
+  assert.match(await read(out, 'parts/002.md'), /^# 2\. Middle\n\nBody text[^#]*$/);
+});
+
+test('титул крупным шрифтом — не главы: строки ### в «До первого заголовка»', async () => {
+  const chapters = [[big('Chapter Alpha', 18), BODY], [big('Chapter Beta', 18), BODY]];
+  const once = await importHeadings('title-once', [
+    [big('Some Author', 20), big('Great Book', 24), big('A Subtitle', 20)],
+    ...chapters,
+  ]);
+  assert.deepEqual(once.files, ['001.md', '002.md', '003.md']);
+  assert.equal(await read(once.out, 'parts/001.md'),
+    '# До первого заголовка\n\n### Some Author\n\n### Great Book\n\n### A Subtitle\n');
+  assert.match(await read(once.out, 'parts/002.md'), /^# Chapter Alpha\n\nBody text/);
+
+  // Название дважды одним текстом: второе — текстом, уровня не даёт.
+  const twice = await importHeadings('title-twice', [
+    [big('Great Book', 24)],
+    [big('Great Book', 24), para('Some Author')],
+    ...chapters,
+  ]);
+  assert.deepEqual(twice.files, ['001.md', '002.md', '003.md']);
+  assert.equal(await read(twice.out, 'parts/001.md'),
+    '# До первого заголовка\n\n### Great Book\n\nGreat Book\n\nSome Author\n');
+});
+
+test('буквица — не заголовок: ни отдельной строкой, ни на одной линии с текстом', async () => {
+  const { out, files } = await importHeadings('drop-cap', [
+    [big('Chapter Alpha', 18), { text: 'W', size: 30, indent: true }, { text: 'hen it began, the story was short.' }, BODY],
+    [big('Chapter Beta', 18), BODY,
+      { text: 'W', size: 30, at: { x: 50, y: 200 } }, { text: 'hen it began again.', at: { x: 80, y: 200 } }],
+  ]);
+  assert.deepEqual(files, ['001.md', '002.md']);
+  const first = await read(out, 'parts/001.md');
+  assert.match(first, /^# Chapter Alpha\n\n[^#]*hen it began, the story was short\.[^#]*$/);
+  const second = await read(out, 'parts/002.md');
+  assert.match(second, /^# Chapter Beta\n\n[^#]*hen it began again\.\n$/);
+});
+
+test('крупный колонтитул с названием главы на каждой странице — одна глава на название', async () => {
+  const header = (title) => ({ text: title, size: 18, at: { y: 470 } });
+  const { out, files } = await importHeadings('big-running-header', [
+    [header('Chapter Alpha'), BODY], [header('Chapter Alpha'), BODY],
+    [header('Chapter Beta'), BODY], [header('Chapter Beta'), BODY],
+    [header('Chapter Gamma'), BODY], [header('Chapter Gamma'), BODY],
+  ]);
+  assert.deepEqual(files, ['001.md', '002.md', '003.md']);
+  const index = await read(out, 'book.md');
+  assert.match(index, /^\| 001 \| Chapter Alpha \|/mu);
+  assert.match(index, /^\| 002 \| Chapter Beta \|/mu);
+  assert.match(index, /^\| 003 \| Chapter Gamma \|/mu);
+});
+
+test('строка оглавления с номером страницы и четыре крупные строки подряд — текст', async () => {
+  const { out, files } = await importHeadings('toc-and-big-text', [
+    [big('Chapter 1 ........ 5', 18), para('Some words.')],
+    [big('Chapter Alpha', 18), BODY,
+      big('Big one', 16), big('Big two', 16), big('Big three', 16), big('Big four', 16), BODY],
+    [big('Chapter Beta', 18), BODY],
+  ]);
+  assert.deepEqual(files, ['001.md', '002.md', '003.md']);
+  assert.equal(await read(out, 'parts/001.md'), '# До первого заголовка\n\nChapter 1 ........ 5\n\nSome words.\n');
+  const alpha = await read(out, 'parts/002.md');
+  assert.match(alpha, /^# Chapter Alpha\n\n[^#]*Big one Big two Big three Big four[^#]*$/);
+});
+
+test('текст и подглава до первой главы — отдельные главы', async () => {
+  const { out, files } = await importHeadings('before-first-chapter', [
+    [para('Opening words.'), big('Early Section', 15), BODY],
+    [big('Chapter Alpha', 18), BODY, big('Section One', 15), BODY],
+    [big('Chapter Beta', 18), big('Section Two', 15), BODY],
+  ]);
+  assert.deepEqual(files, ['001.md', '002.md', '003-00.md', '003-01.md', '004-01.md']);
+  assert.equal(await read(out, 'parts/001.md'), '# До первого заголовка\n\nOpening words.\n');
+  assert.match(await read(out, 'parts/002.md'), /^# Early Section\n\nBody text[^#]*$/);
+  assert.match(await read(out, 'parts/003-00.md'), /^# Chapter Alpha\n\nBody text[^#]*$/);
+  assert.match(await read(out, 'parts/003-01.md'), /^## Section One\n\nBody text[^#]*$/);
+  assert.match(await read(out, 'parts/004-01.md'), /^# Chapter Beta\n\n## Section Two\n\nBody text[^#]*$/);
+});
+
+test('PDF с закладками и крупными заголовками — части как по закладкам', async () => {
+  const { out, result, files } = await importHeadings('bookmarks-and-sizes', [
+    [big('Chapter One', 18), BODY, big('First Section', 15), BODY],
+    [big('Second Section', 15), BODY],
+    [big('Chapter Two', 18), BODY],
+  ], [{ title: 'Part X', page: 0 }, { title: 'Part Y', page: 2 }]);
+  assert.equal(result.stderr, '');
+  assert.deepEqual(files, ['001.md', '002.md']);
+  assert.match(await read(out, 'parts/001.md'), /^# Part X\n\nChapter One\n\n[^#]*First Section[^#]*Second Section[^#]*$/);
+  assert.match(await read(out, 'parts/002.md'), /^# Part Y\n\nChapter Two\n\nBody text[^#]*$/);
+});
+
 test('страница без текста посреди книги ничего не ломает', async () => {
   const input = await pdfFile('blank-page.pdf', {
     pages: [LATIN_PAGE, [], [{ text: 'After the blank page.', indent: true }]],

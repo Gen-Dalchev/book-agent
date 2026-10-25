@@ -1,13 +1,16 @@
-// Строки PDF + закладки → главы и части (типы Chapter/Part из chapters.js).
+// Строки PDF + закладки (или заголовки по крупному шрифту) → главы и части (типы Chapter/Part из chapters.js).
 // Главы и подглавы — по закладкам напрямую, без правила «повторяющийся уровень»:
 // закладка верхнего уровня — глава, второго — подглава, даже если она одна;
 // закладки глубже не делят текст и не дают заголовков.
 import { paragraphs } from './pdf-text.js';
+import { CHAPTER, INLINE } from './pdf-headings.js';
 import { countWords } from './words.js';
 
 export const NO_BOOKMARKS_TITLE = 'Текст';
 // Текст до первой закладки (титул, аннотация) не выбрасывается: он идёт отдельной главой.
 export const BEFORE_BOOKMARKS_TITLE = 'До первой закладки';
+// То же для глав по крупному шрифту.
+export const BEFORE_HEADINGS_TITLE = 'До первого заголовка';
 const UNTITLED = 'Без названия';
 
 /**
@@ -39,6 +42,44 @@ export function singleChapter(lines) {
   return [wholeChapter(NO_BOOKMARKS_TITLE, lines)];
 }
 
+/**
+ * PDF без закладок, заголовки найдены по крупному шрифту (pdf-headings.js). Части — того же вида,
+ * что у закладок. Подглава до первой главы — глава сама по себе; заголовок INLINE текст не делит,
+ * а стоит в нём строкой `###`. Строки заголовков в текст не идут.
+ * @param {import('./pdf-text.js').Line[]} lines строки всей книги
+ * @param {import('./pdf-headings.js').Heading[]} headings по порядку
+ * @returns {import('./chapters.js').Chapter[]}
+ */
+export function chaptersFromHeadings(lines, headings) {
+  const before = { title: BEFORE_HEADINGS_TITLE, blocks: [], sections: [] };
+  const chapters = [];
+  let chapter = null;
+  let blocks = before.blocks;
+  let from = 0;
+  const flush = (to) => {
+    if (to > from) blocks.push(...paragraphs(lines.slice(from, to)));
+  };
+  for (const heading of headings) {
+    flush(heading.start);
+    from = heading.end;
+    if (heading.level === INLINE) {
+      blocks.push(`### ${heading.text}`);
+    } else if (heading.level === CHAPTER || !chapter) {
+      const own = { title: heading.text, blocks: [], sections: [] };
+      chapters.push(own);
+      if (heading.level === CHAPTER) chapter = own;
+      blocks = own.blocks;
+    } else {
+      const section = { title: heading.text, blocks: [] };
+      chapter.sections.push(section);
+      blocks = section.blocks;
+    }
+  }
+  flush(lines.length);
+  if (before.blocks.length > 0) chapters.unshift(before);
+  return chapters.map(headedChapter);
+}
+
 function wholeChapter(title, lines) {
   return { title, parts: [makePart('whole', title, [`# ${title}`, ...paragraphs(lines)])] };
 }
@@ -68,6 +109,18 @@ function bookmarkChapter(bookmark, lines, start, end) {
     const lead = parts.length === 0 ? [head] : [];
     parts.push(makePart('section', section.title, [...lead, `## ${section.title}`, ...paragraphs(body)]));
   });
+  return { title, parts };
+}
+
+function headedChapter({ title, blocks, sections }) {
+  const head = `# ${title}`;
+  if (sections.length === 0) return { title, parts: [makePart('whole', title, [head, ...blocks])] };
+  const parts = [];
+  if (blocks.length > 0) parts.push(makePart('intro', title, [head, ...blocks]));
+  for (const section of sections) {
+    const lead = parts.length === 0 ? [head] : [];
+    parts.push(makePart('section', section.title, [...lead, `## ${section.title}`, ...section.blocks]));
+  }
   return { title, parts };
 }
 
