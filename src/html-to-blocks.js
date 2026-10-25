@@ -1,24 +1,12 @@
 // XHTML главы → плоский список блоков: заголовки (с уровнем из h1–h6) и текстовые
 // блоки в markdown (абзацы, списки, цитаты). Простой обход дерева: курсив и жирный
 // сохраняются, картинки, стили и скрипты отбрасываются, остальное — текстом.
+// Сноски внутри документа (footnotes.js) заменяются метками, а примечания в блоки
+// не попадают: их тексты отдаются отдельно.
 import { parse } from 'node-html-parser';
+import { extractFootnotes } from './footnotes.js';
+import { ELEMENT, TEXT, HEADING_LEVELS, SKIP, BLOCK, tagOf } from './html-tags.js';
 
-const ELEMENT = 1;
-const TEXT = 3;
-
-const HEADING_LEVELS = { h1: 1, h2: 2, h3: 3, h4: 4, h5: 5, h6: 6 };
-const SKIP = new Set([
-  'head', 'title', 'script', 'style', 'noscript', 'template', 'svg', 'math',
-  'img', 'image', 'picture', 'audio', 'video', 'object', 'embed', 'iframe', 'canvas',
-  'input', 'button', 'select', 'textarea',
-]);
-const BLOCK = new Set([
-  'html', 'body', 'main', 'article', 'section', 'nav', 'aside', 'header', 'footer',
-  'div', 'p', 'blockquote', 'pre', 'hr', 'address', 'center', 'figure', 'figcaption',
-  'ul', 'ol', 'li', 'dl', 'dt', 'dd',
-  'table', 'caption', 'thead', 'tbody', 'tfoot', 'tr', 'td', 'th',
-  'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
-]);
 const ITALIC = new Set(['em', 'i', 'cite', 'dfn', 'var']);
 const BOLD = new Set(['strong', 'b']);
 const CODE = new Set(['code', 'kbd', 'samp', 'tt']);
@@ -28,11 +16,19 @@ const CODE = new Set(['code', 'kbd', 'samp', 'tt']);
 const HTML_SPACE = /[ \t\n\r\f]+/g;
 const EDGE_SPACE = /^[ \t\n\r\f]+|[ \t\n\r\f]+$/g;
 
+// Узлы, которые нужно пропустить при выводе: обратные ссылки внутри примечания.
+const NOTHING = new Set();
+let hidden = NOTHING;
+
 /**
  * @param {string} html
- * @returns {{title: string, blocks: ({type: 'heading', level: number, text: string} | {type: 'text', text: string})[]}}
+ * @param {{href?: string}} [options] href — путь документа в архиве: по нему ссылки
+ *   «файл.xhtml#id» на этот же документ тоже считаются сносками
+ * @returns {{title: string, blocks: ({type: 'heading', level: number, text: string} | {type: 'text', text: string})[],
+ *   notes: string[]}}
+ *   notes — тексты сносок; в тексте блоков сноска — служебная метка (footnotes.js)
  */
-export function htmlToBlocks(html) {
+export function htmlToBlocks(html, { href = null } = {}) {
   const root = parse(html, {
     lowerCaseTagName: true,
     comment: false,
@@ -40,9 +36,19 @@ export function htmlToBlocks(html) {
   });
   const title = cleanInline(root.querySelector('title')?.text ?? '').replace(/\n/g, ' ');
   const body = root.querySelector('body') ?? root;
+  const { notes } = extractFootnotes(body, { href, render: renderHiding });
   const blocks = [];
   collectBlocks(body, blocks);
-  return { title, blocks };
+  return { title, blocks, notes };
+}
+
+function renderHiding(element, nodes) {
+  hidden = nodes;
+  try {
+    return renderChildren(element);
+  } finally {
+    hidden = NOTHING;
+  }
 }
 
 function collectBlocks(element, out) {
@@ -149,7 +155,7 @@ function renderInline(node, style = {}) {
   if (node.nodeType === TEXT) return collapse(node.text);
   if (node.nodeType !== ELEMENT) return '';
   const tag = tagOf(node);
-  if (SKIP.has(tag)) return '';
+  if (SKIP.has(tag) || hidden.has(node)) return '';
   if (tag === 'br') return '\n';
   if (ITALIC.has(tag) && !style.italic) {
     return wrap(renderChildren(node, { ...style, italic: true }), '*');
@@ -205,8 +211,4 @@ function hasBlockChildren(element) {
   return element.childNodes.some(
     (child) => child.nodeType === ELEMENT && !SKIP.has(tagOf(child)) && isBlockish(child),
   );
-}
-
-function tagOf(element) {
-  return (element.rawTagName ?? '').toLowerCase();
 }

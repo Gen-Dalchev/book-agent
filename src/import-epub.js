@@ -28,7 +28,7 @@ export async function importEpub(inputPath, outDir, options = {}) {
  */
 export async function importEpubData(data, outDir, { all = false } = {}) {
   const book = await readEpub(data);
-  const documents = book.documents.map((doc) => ({ ...doc, blocks: htmlToBlocks(doc.html).blocks }));
+  const documents = book.documents.map((doc) => ({ ...doc, ...htmlToBlocks(doc.html, { href: doc.href }) }));
   const reasons = all ? documents.map(() => null) : frontMatterReasons({ ...book, documents });
 
   const kept = [];

@@ -6,6 +6,7 @@
 import path from 'node:path';
 import { parse } from 'node-html-parser';
 import { epubTypes, resolveHref } from './epub.js';
+import { plain } from './footnotes.js';
 import { countWords } from './words.js';
 
 // Пороги приняты по умолчанию — поправить по первой настоящей книге.
@@ -76,7 +77,7 @@ export function frontMatterReasons({ metadata, documents, landmarks, guide }) {
     const type = ownMarkup(body) ?? marked.get(doc.href);
     if (type) return `разметка: ${type}`;
 
-    const text = doc.blocks.map((block) => block.text).join('\n').replace(/[*`]/g, '');
+    const text = plain(doc.blocks.map((block) => block.text).join('\n')).replace(/[*`]/g, '');
     const words = countWords(text);
     if (isCopyright(text, words)) return REASONS.copyright;
     if (isTableOfContents(body, doc.href, bookFiles)) return REASONS.toc;
