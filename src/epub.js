@@ -13,13 +13,29 @@ const xmlParser = new XMLParser({
   removeNSPrefix: true,
   parseTagValue: false,
   parseAttributeValue: false,
-  isArray: (name) => ['rootfile', 'item', 'itemref', 'title', 'creator', 'language'].includes(name),
+  isArray: (name) => [
+    'rootfile', 'item', 'itemref',
+    'title', 'creator', 'contributor', 'language', 'publisher', 'date', 'identifier', 'meta',
+  ].includes(name),
 });
+
+// Calibre пишет 0101-01-01, когда дата неизвестна; книг раньше печатного станка не ждём.
+const MIN_YEAR = 1450;
+
+/**
+ * @typedef {object} Metadata
+ * @property {string} title
+ * @property {string[]} authors создатели, кроме переводчиков
+ * @property {string} language
+ * @property {string[]} translators
+ * @property {string[]} publishers
+ * @property {string} year четыре цифры или '' — года нет или он мусорный
+ * @property {string[]} isbns в виде из файла, без префикса urn:isbn:
+ */
 
 /**
  * @param {Uint8Array} data содержимое файла .epub
- * @returns {Promise<{metadata: {title: string, authors: string[], language: string},
- *   documents: {href: string, html: string}[]}>}
+ * @returns {Promise<{metadata: Metadata, documents: {href: string, html: string}[]}>}
  */
 export async function readEpub(data) {
   let zip;
@@ -95,11 +111,73 @@ function parseXml(xml, name) {
 
 function readMetadata(meta = {}) {
   const texts = (values) => (values ?? []).map(textOf).filter(Boolean);
+  const rolesOf = refinedRoles(meta.meta);
+  const isTranslator = (element) => rolesOf(element).includes('trl');
+
+  const creators = meta.creator ?? [];
   return {
     title: texts(meta.title)[0] ?? '',
-    authors: texts(meta.creator),
+    authors: texts(creators.filter((element) => !isTranslator(element))),
     language: texts(meta.language)[0] ?? '',
+    translators: texts([...creators, ...(meta.contributor ?? [])].filter(isTranslator)),
+    publishers: texts(meta.publisher),
+    year: readYear(meta.date),
+    isbns: readIsbns(texts(meta.identifier)),
   };
+}
+
+// Роль создателя: в EPUB 2 — атрибут opf:role, в EPUB 3 —
+// <meta refines="#id" property="role" scheme="marc:relators">.
+function refinedRoles(metas = []) {
+  const byId = new Map();
+  for (const meta of metas) {
+    if (meta?.['@_property'] !== 'role') continue;
+    const scheme = meta['@_scheme'];
+    if (scheme && scheme !== 'marc:relators') continue;
+    const id = String(meta['@_refines'] ?? '').replace(/^#/, '');
+    const role = textOf(meta).toLowerCase();
+    if (!id || !role) continue;
+    byId.set(id, [...(byId.get(id) ?? []), role]);
+  }
+  return (element) => {
+    const roles = [];
+    const own = typeof element === 'object' ? element?.['@_role'] : undefined;
+    if (own) roles.push(String(own).trim().toLowerCase());
+    const id = typeof element === 'object' ? element?.['@_id'] : undefined;
+    if (id) roles.push(...(byId.get(id) ?? []));
+    return roles;
+  };
+}
+
+function readYear(dates = []) {
+  const date = dates.find((element) => element?.['@_event'] === 'publication') ?? dates[0];
+  const year = textOf(date).match(/\d{4}/)?.[0];
+  return year && Number(year) >= MIN_YEAR ? year : '';
+}
+
+function readIsbns(identifiers) {
+  const seen = new Set();
+  const isbns = [];
+  for (const raw of identifiers) {
+    const value = raw.replace(/^(urn:)?isbn:\s*/i, '');
+    const digits = value.replace(/[-\s]/g, '').toUpperCase();
+    if (!isIsbn(digits) || seen.has(digits)) continue;
+    seen.add(digits);
+    isbns.push(value);
+  }
+  return isbns;
+}
+
+function isIsbn(digits) {
+  if (/^\d{13}$/.test(digits)) {
+    const sum = [...digits].reduce((acc, d, i) => acc + Number(d) * (i % 2 ? 3 : 1), 0);
+    return sum % 10 === 0;
+  }
+  if (/^\d{9}[\dX]$/.test(digits)) {
+    const sum = [...digits].reduce((acc, d, i) => acc + (d === 'X' ? 10 : Number(d)) * (10 - i), 0);
+    return sum % 11 === 0;
+  }
+  return false;
 }
 
 function textOf(value) {

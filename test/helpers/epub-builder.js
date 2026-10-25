@@ -22,8 +22,11 @@ ${body}
  * @param {{id: string, href: string, content: string | Uint8Array, mediaType?: string}[]} book.items
  *   файлы манифеста в том порядке, в каком лягут в архив
  * @param {string[]} book.spine id в порядке чтения
+ * @param {string} [book.author] без него — ни одного dc:creator (кроме тех, что в book.metadata)
+ * @param {'2.0' | '3.0'} [book.version]
+ * @param {string} [book.metadata] XML, дописываемый в <metadata> как есть
  */
-export async function buildEpub({ title, author, language, items, spine }) {
+export async function buildEpub({ title, author, language, items, spine, version = '3.0', metadata = '' }) {
   const zip = new JSZip();
   zip.file('mimetype', 'application/epub+zip', { compression: 'STORE' });
   zip.file('META-INF/container.xml', `<?xml version="1.0" encoding="UTF-8"?>
@@ -38,12 +41,12 @@ export async function buildEpub({ title, author, language, items, spine }) {
     .join('\n');
   const itemrefs = spine.map((id) => `    <itemref idref="${id}"/>`).join('\n');
   zip.file('OEBPS/content.opf', `<?xml version="1.0" encoding="UTF-8"?>
-<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="uid">
-  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+<package xmlns="http://www.idpf.org/2007/opf" version="${version}" unique-identifier="uid">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:opf="http://www.idpf.org/2007/opf">
     <dc:identifier id="uid">test-book</dc:identifier>
     <dc:title>${title}</dc:title>
-    <dc:creator id="author">${author}</dc:creator>
-    <dc:language>${language}</dc:language>
+${author === undefined ? '' : `    <dc:creator id="author">${author}</dc:creator>\n`}    <dc:language>${language}</dc:language>
+${metadata}
   </metadata>
   <manifest>
 ${manifest}
