@@ -8,11 +8,13 @@
     "node": ">=24"
   },
   "bin": {
-    "book-import": "bin/import.js"
+    "book-import": "bin/import.js",
+    "book-show": "bin/show.js"
   },
   "scripts": {
     "test": "node --test",
-    "import": "node bin/import.js"
+    "import": "node bin/import.js",
+    "show": "node bin/show.js"
   },
   "dependencies": {
     "fast-xml-parser": "^5.11.2",
