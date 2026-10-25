@@ -13,7 +13,7 @@ export function partId(chapterNumber, subNumber = null) {
 }
 
 /**
- * @param {{metadata: {title: string, authors: string[], language: string},
+ * @param {{metadata: import('./epub.js').Metadata,
  *   chapters: import('./chapters.js').Chapter[]}} book
  * @returns {{files: {path: string, content: string}[], chapterCount: number, partCount: number}}
  */
@@ -51,11 +51,16 @@ export function planBook({ metadata, chapters }) {
 }
 
 function renderIndex(metadata, chapterCount, partCount, rows) {
+  const list = (values = []) => values.join(', ') || 'не указан';
   const lines = [
     `# ${metadata.title || 'Без названия'}`,
     '',
-    `- Автор: ${metadata.authors.join(', ') || 'не указан'}`,
+    `- Автор: ${list(metadata.authors)}`,
     `- Язык: ${metadata.language || 'не указан'}`,
+    `- Переводчик: ${list(metadata.translators)}`,
+    `- Издатель: ${list(metadata.publishers)}`,
+    `- Год: ${metadata.year || 'не указан'}`,
+    `- ISBN: ${list(metadata.isbns)}`,
     `- Глав: ${chapterCount}`,
     `- Частей: ${partCount}`,
     '',
