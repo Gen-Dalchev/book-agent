@@ -3,6 +3,7 @@
 // закладка верхнего уровня — глава, второго — подглава, даже если она одна;
 // закладки глубже не делят текст и не дают заголовков.
 import { paragraphs } from './pdf-text.js';
+import { bookWords } from './pdf-clean.js';
 import { CHAPTER, INLINE } from './pdf-headings.js';
 import { countWords } from './words.js';
 
@@ -21,25 +22,26 @@ const UNTITLED = 'Без названия';
 /**
  * @param {import('./pdf-text.js').Line[]} lines строки всей книги
  * @param {Bookmark[]} bookmarks закладки верхнего уровня, в порядке оглавления PDF
+ * @param {Set<string>} [words] словарь книги для склейки строк (bookWords из pdf-clean.js)
  * @returns {import('./chapters.js').Chapter[]}
  */
-export function chaptersFromBookmarks(lines, bookmarks) {
+export function chaptersFromBookmarks(lines, bookmarks, words = bookWords(lines)) {
   const starts = bookmarks.map((bookmark) => lineAt(lines, bookmark));
   const chapters = [];
   if (starts.length > 0 && starts[0] > 0) {
-    chapters.push(wholeChapter(BEFORE_BOOKMARKS_TITLE, lines.slice(0, starts[0])));
+    chapters.push(wholeChapter(BEFORE_BOOKMARKS_TITLE, lines.slice(0, starts[0]), words));
   }
   bookmarks.forEach((bookmark, index) => {
     const start = starts[index];
     const end = Math.max(start, index + 1 < starts.length ? starts[index + 1] : lines.length);
-    chapters.push(bookmarkChapter(bookmark, lines, start, end));
+    chapters.push(bookmarkChapter(bookmark, lines, start, end, words));
   });
   return chapters;
 }
 
 /** PDF без закладок — книга одной главой. */
-export function singleChapter(lines) {
-  return [wholeChapter(NO_BOOKMARKS_TITLE, lines)];
+export function singleChapter(lines, words = bookWords(lines)) {
+  return [wholeChapter(NO_BOOKMARKS_TITLE, lines, words)];
 }
 
 /**
@@ -48,16 +50,17 @@ export function singleChapter(lines) {
  * а стоит в нём строкой `###`. Строки заголовков в текст не идут.
  * @param {import('./pdf-text.js').Line[]} lines строки всей книги
  * @param {import('./pdf-headings.js').Heading[]} headings по порядку
+ * @param {Set<string>} [words] словарь книги для склейки строк (bookWords из pdf-clean.js)
  * @returns {import('./chapters.js').Chapter[]}
  */
-export function chaptersFromHeadings(lines, headings) {
+export function chaptersFromHeadings(lines, headings, words = bookWords(lines)) {
   const before = { title: BEFORE_HEADINGS_TITLE, blocks: [], sections: [] };
   const chapters = [];
   let chapter = null;
   let blocks = before.blocks;
   let from = 0;
   const flush = (to) => {
-    if (to > from) blocks.push(...paragraphs(lines.slice(from, to)));
+    if (to > from) blocks.push(...paragraphs(lines.slice(from, to), words));
   };
   for (const heading of headings) {
     flush(heading.start);
@@ -80,18 +83,18 @@ export function chaptersFromHeadings(lines, headings) {
   return chapters.map(headedChapter);
 }
 
-function wholeChapter(title, lines) {
-  return { title, parts: [makePart('whole', title, [`# ${title}`, ...paragraphs(lines)])] };
+function wholeChapter(title, lines, words) {
+  return { title, parts: [makePart('whole', title, [`# ${title}`, ...paragraphs(lines, words)])] };
 }
 
-function bookmarkChapter(bookmark, lines, start, end) {
+function bookmarkChapter(bookmark, lines, start, end, words) {
   const title = cleanTitle(bookmark.title);
   // Напечатанный заголовок, совпадающий с закладкой, не повторяем: он уже в «#».
   const from = start < end && sameText(lines[start].text, title) ? start + 1 : start;
   const own = lines.slice(from, end);
   const head = `# ${title}`;
   if (bookmark.children.length === 0) {
-    return { title, parts: [makePart('whole', title, [head, ...paragraphs(own)])] };
+    return { title, parts: [makePart('whole', title, [head, ...paragraphs(own, words)])] };
   }
 
   const sections = bookmark.children.map((child) => ({
@@ -100,14 +103,14 @@ function bookmarkChapter(bookmark, lines, start, end) {
   }));
   const parts = [];
   const intro = own.slice(0, sections[0].index);
-  if (intro.length > 0) parts.push(makePart('intro', title, [head, ...paragraphs(intro)]));
+  if (intro.length > 0) parts.push(makePart('intro', title, [head, ...paragraphs(intro, words)]));
   sections.forEach((section, index) => {
     const next = index + 1 < sections.length ? Math.max(section.index, sections[index + 1].index) : own.length;
     let body = own.slice(section.index, next);
     if (body.length > 0 && sameText(body[0].text, section.title)) body = body.slice(1);
     // Заголовок главы — в начале первой части главы, где бы она ни начиналась.
     const lead = parts.length === 0 ? [head] : [];
-    parts.push(makePart('section', section.title, [...lead, `## ${section.title}`, ...paragraphs(body)]));
+    parts.push(makePart('section', section.title, [...lead, `## ${section.title}`, ...paragraphs(body, words)]));
   });
   return { title, parts };
 }

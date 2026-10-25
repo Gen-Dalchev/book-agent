@@ -11,9 +11,17 @@ export const MIN_PAGES_FOR_HEADERS = 4;
 // Номер страницы: одно число, «— 12 —» или «12 / 300».
 const PAGE_NUMBER = /^(?:[-–—]\s*)?(\d+)(?:\s*[-–—]|\s*\/\s*\d+)?$/u;
 const SOFT_HYPHEN = '­';
-// Перенос: строка кончается на «-» или «‐» (U+2010) сразу после буквы, следующая — со строчной.
+// Разрыв слова: строка кончается на «-» или «‐» (U+2010) сразу после буквы, следующая — с буквы.
 const HYPHEN_END = /(?<=\p{L})[-‐]$/u;
-const LOWERCASE_START = /^\p{Ll}/u;
+const LETTER_START = /^\p{L}/u;
+const UPPERCASE_START = /^[\p{Lu}\p{Lt}]/u;
+const ALL_UPPERCASE = /^[\p{Lu}\p{M}]+$/u;
+// Части разорванного слова: подряд буквы перед дефисом и в начале следующей строки.
+const LEFT_PART = /[\p{L}\p{M}]+(?=[-‐]$)/u;
+const RIGHT_PART = /^[\p{L}\p{M}]+/u;
+// Слово словаря: подряд буквы и дефисы; знаки препинания по краям отрезаются.
+const EDGE_NON_LETTERS = /^[^\p{L}\p{M}]+|[^\p{L}\p{M}]+$/gu;
+const WORD = /^[\p{L}\p{M}-]+$/u;
 
 /**
  * Края страницы в координатах PDF (y снизу вверх).
@@ -94,16 +102,51 @@ function pageNumbers(pageLines, edges) {
 }
 
 /**
- * Склеивает строку абзаца со следующей: перенос — без дефиса и пробела, иначе через пробел.
- * Принятая ошибка: составное слово, разорванное ровно на своём дефисе («какой-» + «нибудь»),
- * склеится без дефиса.
+ * Словарь книги — как слова написаны не на разрыве строки: слова всех строк, кроме последнего слова
+ * строки, которая кончается дефисом после буквы, и первого слова строки после неё.
+ * Слова — в нижнем регистре, «‐» (U+2010) — как «-».
+ * @param {{text: string}[]} lines строки всей книги по порядку, без колонтитулов и номеров страниц
+ * @returns {Set<string>}
+ */
+export function bookWords(lines) {
+  const words = new Set();
+  lines.forEach((line, index) => {
+    const tokens = removeSoftHyphens(line.text).split(/\s+/u);
+    const from = index > 0 && HYPHEN_END.test(lines[index - 1].text) ? 1 : 0;
+    const to = HYPHEN_END.test(line.text) ? tokens.length - 1 : tokens.length;
+    for (const token of tokens.slice(from, to)) {
+      const word = normalizeWord(token.replace(EDGE_NON_LETTERS, ''));
+      if (WORD.test(word)) words.add(word);
+    }
+  });
+  return words;
+}
+
+function normalizeWord(word) {
+  return word.replaceAll('‐', '-').toLowerCase();
+}
+
+/**
+ * Склеивает строку абзаца со следующей. Строка кончается дефисом после буквы, следующая начинается
+ * с буквы — слово разорвано:
+ * - следующая с прописной, а левая часть не вся из прописных — дефис остаётся, без пробела
+ *   («Петров-» + «Водкин» → «Петров-Водкин»);
+ * - иначе решает словарь книги без учёта регистра: «левая-правая» в нём есть, а «леваяправая» нет —
+ *   дефис остаётся («какой-» + «нибудь» → «какой-нибудь»); иначе — без дефиса («пере-» + «носах»).
+ * В остальных случаях — через пробел.
+ * Принятая ошибка: составное слово, которое в книге больше нигде не пишется через дефис, склеится без дефиса.
  * @param {string} text
  * @param {string} next
+ * @param {Set<string>} [words] словарь книги (bookWords)
  * @returns {string}
  */
-export function joinLines(text, next) {
-  if (HYPHEN_END.test(text) && LOWERCASE_START.test(next)) return text.slice(0, -1) + next;
-  return `${text} ${next}`;
+export function joinLines(text, next, words = new Set()) {
+  if (!HYPHEN_END.test(text) || !LETTER_START.test(next)) return `${text} ${next}`;
+  const left = LEFT_PART.exec(removeSoftHyphens(text))?.[0] ?? '';
+  const right = RIGHT_PART.exec(removeSoftHyphens(next))?.[0] ?? '';
+  if (UPPERCASE_START.test(next) && !ALL_UPPERCASE.test(left)) return text + next;
+  const compound = words.has(normalizeWord(`${left}-${right}`)) && !words.has(normalizeWord(left + right));
+  return compound ? text + next : text.slice(0, -1) + next;
 }
 
 /**

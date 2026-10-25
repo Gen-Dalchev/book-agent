@@ -2,6 +2,7 @@
 // (без закладок — по крупному шрифту) →
 // записать папку книги в той же раскладке, что у EPUB. Всё проверяется до записи.
 import { textLines } from './pdf-text.js';
+import { bookWords } from './pdf-clean.js';
 import { findHeadings } from './pdf-headings.js';
 import { chaptersFromBookmarks, chaptersFromHeadings, singleChapter } from './pdf-chapters.js';
 import { planBook } from './layout.js';
@@ -25,19 +26,21 @@ export async function importPdfData(data, outDir) {
     throw new ImportError('В PDF нет текстового слоя — похоже на скан; такие пока не поддерживаются.');
   }
 
+  // Как слова пишутся в книге не на разрыве строки — по нему склеиваются слова, разорванные дефисом.
+  const words = bookWords(lines);
   const warnings = [];
   let chapters;
   if (book.bookmarks.length > 0) {
-    chapters = chaptersFromBookmarks(lines, book.bookmarks);
+    chapters = chaptersFromBookmarks(lines, book.bookmarks, words);
   } else {
     // Без закладок — главы по крупному шрифту; не нашлись — книга одной главой.
-    const headings = findHeadings(lines);
+    const headings = findHeadings(lines, words);
     if (headings.length > 0) {
       warnings.push(FONT_HEADINGS_WARNING);
-      chapters = chaptersFromHeadings(lines, headings);
+      chapters = chaptersFromHeadings(lines, headings, words);
     } else {
       warnings.push(NO_BOOKMARKS_WARNING);
-      chapters = singleChapter(lines);
+      chapters = singleChapter(lines, words);
     }
   }
   const plan = planBook({ metadata: book.metadata, chapters });

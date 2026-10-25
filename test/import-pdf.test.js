@@ -88,7 +88,7 @@ test('колонтитулы и номера страниц убраны, год
     '1924',
     'Мягкий перенос внутри строки исчезает, слово остаётся целым.',
   ].join('\n\n') + '\n');
-  // «well-» + «known» → «wellknown» — принятая ошибка: составное слово на своём дефисе склеивается.
+  // «well-» + «known» → «wellknown» — принятая ошибка: «well-known» больше нигде в книге не пишется.
   assert.equal(await read(out, 'parts/002.md'), [
     '# Вторая часть',
     'Здесь у верхнего края нет колонтитула, а внизу он есть.',
@@ -333,6 +333,39 @@ test('PDF с закладками и крупными заголовками —
   assert.deepEqual(word.files, ['001.md', '002.md']);
   assert.match(await read(word.out, 'parts/001.md'), /^# Part X\n\nChapter One\n\n[^#]*Epigraph One[^#]*Epigraph Two[^#]*$/);
   assert.match(await read(word.out, 'parts/002.md'), /^# Part Y\n\nChapter Two\n\nBody text[^#]*$/);
+});
+
+test('слово, разорванное дефисом, — по словарю книги; перед прописной — дефис без пробела', async () => {
+  const broken = [
+    { text: 'Here a hyphen-', indent: true },
+    { text: 'ated word, a well-' },
+    { text: 'known one and Smith-' },
+    { text: 'Jones met.' },
+  ];
+  const cases = [
+    ['with-words', para('Spelled hyphenated and well-known elsewhere.'),
+      'Here a hyphenated word, a well-known one and Smith-Jones met.'],
+    // Одна страница, слова больше нигде нет: склеено без дефиса (принятая ошибка для «well-known»).
+    ['without-words', para('Nothing else here.'),
+      'Here a hyphenated word, a wellknown one and Smith-Jones met.'],
+  ];
+  for (const [name, other, expected] of cases) {
+    const input = await pdfFile(`${name}.pdf`, { title: 'Hyphens', pages: [[...broken, other]] });
+    const out = path.join(tmp, name);
+    const result = runImport(input, out);
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(await read(out, 'parts/001.md'), `# Текст\n\n${expected}\n\n${other.text}\n`, name);
+  }
+});
+
+test('заголовок капсом, разорванный дефисом, — по словарю книги без учёта регистра', async () => {
+  const { out, files } = await importHeadings('caps-headings', [
+    [big('PRE-', 18), big('FIXED', 18), para('A prefixed word stands here.')],
+    [big('ANGLO-', 18), big('SAXON', 18), para('The anglo-saxon word stands here.')],
+  ]);
+  assert.deepEqual(files, ['001.md', '002.md']);
+  assert.equal(await read(out, 'parts/001.md'), '# PREFIXED\n\nA prefixed word stands here.\n');
+  assert.equal(await read(out, 'parts/002.md'), '# ANGLO-SAXON\n\nThe anglo-saxon word stands here.\n');
 });
 
 test('страница без текста посреди книги ничего не ломает', async () => {
