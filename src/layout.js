@@ -54,7 +54,16 @@ export function planBook({ metadata, chapters, skipped = [] }) {
   return { files, chapterCount: chapters.length, partCount };
 }
 
-function renderIndex(metadata, chapterCount, partCount, footnoteCount, rows, skipped) {
+/**
+ * Текст book.md: шапка, оглавление и, если есть, «Пропущено».
+ * @param {import('./epub.js').Metadata} metadata
+ * @param {number} chapterCount
+ * @param {number} partCount
+ * @param {number} footnoteCount
+ * @param {(string | number)[][]} rows строки оглавления: часть, заголовок, файл, слов
+ * @param {{file: string, start: string, reason: string}[]} [skipped]
+ */
+export function renderIndex(metadata, chapterCount, partCount, footnoteCount, rows, skipped = []) {
   const list = (values = []) => values.join(', ') || 'не указан';
   const lines = [
     `# ${metadata.title || 'Без названия'}`,
@@ -73,7 +82,7 @@ function renderIndex(metadata, chapterCount, partCount, footnoteCount, rows, ski
     '',
     '| Часть | Заголовок | Файл | Слов |',
     '| --- | --- | --- | ---: |',
-    ...rows.map((row) => `| ${row.map(cell).join(' | ')} |`),
+    ...rows.map(tableRow),
   ];
   if (skipped.length > 0) {
     lines.push(
@@ -82,12 +91,17 @@ function renderIndex(metadata, chapterCount, partCount, footnoteCount, rows, ski
       '',
       '| Файл | Начало | Причина |',
       '| --- | --- | --- |',
-      ...skipped.map((page) => `| ${[page.file, page.start, page.reason].map(cell).join(' | ')} |`),
+      ...skipped.map((page) => tableRow([page.file, page.start, page.reason])),
     );
   }
   return `${lines.join('\n')}\n`;
 }
 
-function cell(value) {
+/** Строка таблицы markdown: «| a | b | c |». */
+export function tableRow(values) {
+  return `| ${values.map(cell).join(' | ')} |`;
+}
+
+export function cell(value) {
   return String(value).replace(/\s*\n\s*/g, ' ').replace(/\|/g, '\\|');
 }

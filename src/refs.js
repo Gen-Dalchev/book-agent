@@ -10,13 +10,14 @@ import { RefError } from './errors.js';
 
 export const REF_FORMAT = 'ссылка — часть и, если нужно, абзацы: «003-02», «003-02 ¶12», «003-02 ¶3–5»; часть — NNN или NNN-MM';
 
-const PART_NAME = /^(\d{3})(?:-(\d{2}))?$/;
+// Признаки строк и блоков — общие со сборкой куска (append.js): кусок делится так же, как потом считается.
+export const PART_NAME = /^(\d{3})(?:-(\d{2}))?$/;
 const RANGE = /^(\d+)(?:\s*[-–—]\s*(\d+))?$/;
-const BLANK = /^\s*$/;
-const FENCE = /^```/;
-const HEADING = /^#{1,6} /;
-const SEPARATOR = /^(?:---|\*\*\*|\* \* \*)$/;
-const DEFINITION = /^\[\^\d+\]: /;
+export const BLANK = /^\s*$/;
+export const FENCE = /^```/;
+export const HEADING = /^#{1,6} /;
+export const SEPARATOR = /^(?:---|\*\*\*|\* \* \*)$/;
+export const DEFINITION = /^\[\^\d+\]: /;
 
 /**
  * @typedef {{kind: 'paragraph' | 'heading' | 'separator' | 'definitions', text: string, number?: number}} Block
