@@ -1,7 +1,7 @@
 // Импорт EPUB целиком: прочитать архив → отложить служебные страницы → нарезать
 // на части → записать папку книги. Всё проверяется до записи: при ошибке папка не создаётся.
-import { readFile } from 'node:fs/promises';
 import { readEpub } from './epub.js';
+import { readInput } from './input.js';
 import { htmlToBlocks } from './html-to-blocks.js';
 import { buildChapters, fallbackTitle } from './chapters.js';
 import { frontMatterReasons } from './front-matter.js';
@@ -15,9 +15,18 @@ import { ImportError } from './errors.js';
  * @param {{all?: boolean}} [options] all — служебные страницы не пропускать
  * @returns {Promise<{title: string, chapterCount: number, partCount: number}>}
  */
-export async function importEpub(inputPath, outDir, { all = false } = {}) {
+export async function importEpub(inputPath, outDir, options = {}) {
   await ensureEmptyDir(outDir);
-  const data = await readInput(inputPath);
+  return importEpubData(await readInput(inputPath), outDir, options);
+}
+
+/**
+ * То же для уже прочитанного файла: формат определил общий импорт (import.js).
+ * @param {Uint8Array} data содержимое файла .epub
+ * @param {string} outDir папка книги: проверена заранее, новая или пустая
+ * @param {{all?: boolean}} [options]
+ */
+export async function importEpubData(data, outDir, { all = false } = {}) {
   const book = await readEpub(data);
   const documents = book.documents.map((doc) => ({ ...doc, blocks: htmlToBlocks(doc.html).blocks }));
   const reasons = all ? documents.map(() => null) : frontMatterReasons({ ...book, documents });
@@ -40,14 +49,4 @@ export async function importEpub(inputPath, outDir, { all = false } = {}) {
   const plan = planBook({ metadata: book.metadata, chapters, skipped });
   await writeFiles(outDir, plan.files);
   return { title: book.metadata.title, chapterCount: plan.chapterCount, partCount: plan.partCount };
-}
-
-async function readInput(inputPath) {
-  try {
-    return await readFile(inputPath);
-  } catch (error) {
-    if (error.code === 'ENOENT') throw new ImportError(`Файл не найден: ${inputPath}`);
-    if (error.code === 'EISDIR') throw new ImportError(`${inputPath} — это папка, а нужен файл .epub.`);
-    throw error;
-  }
 }

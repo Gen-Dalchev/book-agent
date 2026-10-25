@@ -219,5 +219,5 @@ test('все страницы служебные — ошибка с подск�
 test('подсказка команды называет ключ --all', () => {
   const result = runCli('одна.epub');
   assert.equal(result.status, 2);
-  assert.match(result.stderr, /Как запускать: npm run import -- <файл\.epub> <папка> \[--all\]/);
+  assert.match(result.stderr, /Как запускать: npm run import -- <файл\.epub\|файл\.pdf> <папка> \[--all\]/);
 });
