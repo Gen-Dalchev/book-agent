@@ -7,8 +7,10 @@ import { joinLines, removeSoftHyphens } from './pdf-clean.js';
 
 // Размер входит в группу, если он меньше стольких наименьших размеров группы.
 export const SAME_SIZE = 1.05;
-// Строка заголовка набрана не мельче стольких основных размеров.
-export const HEADING_SIZE = 1.2;
+// Строка заголовка набрана не мельче стольких основных размеров: Word набирает заголовки 14 при тексте 12.
+export const HEADING_SIZE = 1.1;
+// Допуск на округление при сравнении размеров: 13,2 при основном 12 — ровно 1,1 ×, а не меньше.
+const ROUNDING = 1e-6;
 // Строка заголовка — не длиннее стольких знаков.
 export const MAX_HEADING_CHARS = 120;
 // Больше стольких строк заголовка подряд — текст крупным шрифтом, а не заголовок.
@@ -40,7 +42,7 @@ export function findHeadings(lines) {
   const { groupOf, groupSizes } = sizeGroups(lines);
   const groups = lines.map((line) => groupOf.get(line.size));
   const mainSize = groupSizes[mainGroup(lines, groups)];
-  const isHeadingLine = (line, index) => groupSizes[groups[index]] >= HEADING_SIZE * mainSize
+  const isHeadingLine = (line, index) => groupSizes[groups[index]] >= HEADING_SIZE * mainSize * (1 - ROUNDING)
     && [...line.text].length <= MAX_HEADING_CHARS
     && !isSingleLetter(line.text)
     && !TOC_LINE.test(line.text);
