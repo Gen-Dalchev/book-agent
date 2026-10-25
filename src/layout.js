@@ -1,6 +1,7 @@
 // Раскладка книги на диске: какие файлы и с каким содержимым. Черновая
 // (book.md + parts/NNN[-MM].md): окончательную утвердит владелец, поэтому
 // имена файлов и вид оглавления собраны здесь и больше нигде.
+import { countNoteDefinitions } from './footnotes.js';
 
 export const INDEX_FILE = 'book.md';
 export const PARTS_DIR = 'parts';
@@ -45,14 +46,15 @@ export function planBook({ metadata, chapters, skipped = [] }) {
   });
 
   const partCount = files.length;
+  const noteCount = files.reduce((sum, file) => sum + countNoteDefinitions(file.content), 0);
   files.unshift({
     path: INDEX_FILE,
-    content: renderIndex(metadata, chapters.length, partCount, rows, skipped),
+    content: renderIndex(metadata, chapters.length, partCount, noteCount, rows, skipped),
   });
   return { files, chapterCount: chapters.length, partCount };
 }
 
-function renderIndex(metadata, chapterCount, partCount, rows, skipped) {
+function renderIndex(metadata, chapterCount, partCount, noteCount, rows, skipped) {
   const list = (values = []) => values.join(', ') || 'не указан';
   const lines = [
     `# ${metadata.title || 'Без названия'}`,
@@ -65,6 +67,7 @@ function renderIndex(metadata, chapterCount, partCount, rows, skipped) {
     `- ISBN: ${list(metadata.isbns)}`,
     `- Глав: ${chapterCount}`,
     `- Частей: ${partCount}`,
+    `- Сносок: ${noteCount}`,
     '',
     '## Оглавление',
     '',

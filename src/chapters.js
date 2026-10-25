@@ -4,7 +4,11 @@
 // Глава — непустой документ. Её заголовок — заголовок в самом начале документа.
 // Подглава — подзаголовок самого верхнего уровня из тех, что повторяются в главе
 // (обычно h2 или h3). Повторяющихся нет — глава остаётся одной частью.
+//
+// Сноски (Б-07) нумеруются в каждой части заново, определения — в конце её файла;
+// в заголовках для оглавления меток нет.
 import { countWords } from './words.js';
+import { placeNotes, stripNoteMarks } from './footnotes.js';
 
 const HAS_TEXT = /[\p{L}\p{N}]/u;
 const FALLBACK_TITLE_WORDS = 8;
@@ -16,7 +20,8 @@ const FALLBACK_TITLE_WORDS = 8;
  */
 
 /**
- * @param {{blocks: Block[]}[]} documents в порядке чтения
+ * @param {{blocks: Block[], notes?: string[]}[]} documents в порядке чтения;
+ *   notes — тексты сносок по номеру метки в блоках (html-to-blocks.js)
  * @returns {Chapter[]} пустые документы (обложка, одна картинка) пропущены
  */
 export function buildChapters(documents) {
@@ -24,12 +29,12 @@ export function buildChapters(documents) {
 }
 
 /** @returns {Chapter | null} */
-export function splitDocument({ blocks }) {
+export function splitDocument({ blocks, notes = [] }) {
   if (!blocks.some((block) => HAS_TEXT.test(block.text))) return null;
 
   const titleBlock = blocks[0].type === 'heading' ? blocks[0] : null;
   const rest = titleBlock ? blocks.slice(1) : blocks;
-  const title = titleBlock?.text ?? fallbackTitle(blocks);
+  const title = titleBlock ? stripNoteMarks(titleBlock.text) : fallbackTitle(blocks);
 
   const sectionLevel = repeatedTopLevel(rest);
   const subLevel = sectionLevel ?? Math.min(...headingLevels(rest));
@@ -39,8 +44,9 @@ export function splitDocument({ blocks }) {
     return `${marks} ${block.text}`;
   };
   const makePart = (kind, partTitle, partBlocks) => {
-    const markdown = `${partBlocks.map(toMarkdown).join('\n\n')}\n`;
-    return { kind, title: partTitle, markdown, words: countWords(markdown) };
+    const text = `${partBlocks.map(toMarkdown).join('\n\n')}\n`;
+    const { markdown, notes: used } = placeNotes(text, notes);
+    return { kind, title: partTitle, markdown, words: countWords(text) + countWords(used.join('\n')) };
   };
 
   if (sectionLevel === null) {
@@ -62,7 +68,7 @@ export function splitDocument({ blocks }) {
     while (end < rest.length && !isSectionStart(rest[end])) end += 1;
     // Заголовок главы — в начале первой части главы, где бы она ни начиналась.
     const lead = parts.length === 0 ? head : [];
-    parts.push(makePart('section', rest[start].text, [...lead, ...rest.slice(start, end)]));
+    parts.push(makePart('section', stripNoteMarks(rest[start].text), [...lead, ...rest.slice(start, end)]));
     start = end;
   }
   return { title, parts };
@@ -83,7 +89,7 @@ function repeatedTopLevel(blocks) {
 // Так же подписан пропущенный документ в «Пропущено».
 export function fallbackTitle(blocks) {
   const first = blocks.find((block) => HAS_TEXT.test(block.text));
-  const words = first.text.replace(/[*`#>]/g, '').split(/\s+/u).filter(Boolean);
+  const words = stripNoteMarks(first.text).replace(/[*`#>]/g, '').split(/\s+/u).filter(Boolean);
   const head = words.slice(0, FALLBACK_TITLE_WORDS).join(' ');
   return words.length > FALLBACK_TITLE_WORDS ? `${head}…` : head;
 }

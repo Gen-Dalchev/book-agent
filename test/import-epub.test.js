@@ -86,7 +86,7 @@ test('книга раскладывается на book.md и части в по
   assert.match(index, /^- Автор: Автор Тестов$/m);
   assert.match(index, /^- Язык: ru$/m);
   assert.match(index, /^- Глав: 2$/m);
-  assert.match(index, /^- Частей: 4$/m);
+  assert.match(index, /^- Частей: 4\n- Сносок: 0$/m);
   assert.match(index, /^\| 001 \| Пролог \| — \| \d+ \|$/m);
   assert.match(index, /^\| 001-00 \| Начало главы \| parts\/001-00\.md \| 9 \|$/m);
   assert.match(index, /^\| 001-01 \| Утро \| parts\/001-01\.md \| \d+ \|$/m);

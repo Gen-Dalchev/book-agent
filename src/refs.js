@@ -2,8 +2,11 @@
 // по файлу части, а не по внутренностям импорта: файл делится на блоки по пустой
 // строке; блок кода в ``` — один блок; заголовки и разделители не считаются;
 // остальные блоки — абзацы, по порядку с 1. Этот счёт — мерило нумерации.
+// Последний блок, где каждая строка начинается с `[^N]: `, — определения сносок,
+// не абзац (Б-07).
 import { readdir, readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
+import { isNoteDefinitions } from './footnotes.js';
 import { partId, PARTS_DIR } from './layout.js';
 import { RefError } from './errors.js';
 
@@ -17,7 +20,7 @@ const HEADING = /^#{1,6} /;
 const SEPARATOR = /^(?:---|\*\*\*|\* \* \*)$/;
 
 /**
- * @typedef {{kind: 'paragraph' | 'heading' | 'separator', text: string, number?: number}} Block
+ * @typedef {{kind: 'paragraph' | 'heading' | 'separator' | 'notes', text: string, number?: number}} Block
  * @typedef {{part: string, from: number | null, to: number | null}} Ref
  *   from и to — null, когда нужна вся часть
  */
@@ -44,6 +47,8 @@ export function splitBlocks(markdown) {
     lines.push(line);
   }
   flush();
+  const last = blocks.at(-1);
+  if (last?.kind === 'paragraph' && isNoteDefinitions(last.text)) last.kind = 'notes';
   let number = 0;
   for (const block of blocks) {
     if (block.kind === 'paragraph') block.number = ++number;

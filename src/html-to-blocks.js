@@ -1,7 +1,10 @@
 // XHTML главы → плоский список блоков: заголовки (с уровнем из h1–h6) и текстовые
 // блоки в markdown (абзацы, списки, цитаты). Простой обход дерева: курсив и жирный
 // сохраняются, картинки, стили и скрипты отбрасываются, остальное — текстом.
-import { parse } from 'node-html-parser';
+// Сноски внутри документа (footnotes.js): примечание вырезается, его текст — в notes,
+// на месте ссылки — метка с номером примечания; номера сносок ставит часть (chapters.js).
+import { parse, TextNode } from 'node-html-parser';
+import { cutNote, findFootnotes, noteMark, SPACE_BEFORE_MARK } from './footnotes.js';
 
 const ELEMENT = 1;
 const TEXT = 3;
@@ -30,9 +33,11 @@ const EDGE_SPACE = /^[ \t\n\r\f]+|[ \t\n\r\f]+$/g;
 
 /**
  * @param {string} html
- * @returns {{title: string, blocks: ({type: 'heading', level: number, text: string} | {type: 'text', text: string})[]}}
+ * @param {{href?: string}} [options] href — путь документа в книге, для ссылок «этот-файл.xhtml#id»
+ * @returns {{title: string, blocks: ({type: 'heading', level: number, text: string} | {type: 'text', text: string})[],
+ *   notes: string[]}} notes — тексты сносок документа по номеру метки в блоках
  */
-export function htmlToBlocks(html) {
+export function htmlToBlocks(html, { href } = {}) {
   const root = parse(html, {
     lowerCaseTagName: true,
     comment: false,
@@ -40,9 +45,40 @@ export function htmlToBlocks(html) {
   });
   const title = cleanInline(root.querySelector('title')?.text ?? '').replace(/\n/g, ' ');
   const body = root.querySelector('body') ?? root;
+  const notes = takeFootnotes(body, href);
   const blocks = [];
   collectBlocks(body, blocks);
-  return { title, blocks };
+  return { title, blocks, notes };
+}
+
+function takeFootnotes(body, href) {
+  const { footnotes, backlinks } = findFootnotes(body, href);
+  const numbers = new Map();
+  const notes = [];
+  for (const { link, note } of footnotes) {
+    if (numbers.has(note)) continue;
+    numbers.set(note, notes.length);
+    notes.push(noteText(note, link, backlinks));
+  }
+  for (const note of numbers.keys()) cutNote(note);
+  for (const { link, note } of footnotes) {
+    link.replaceWith(new TextNode(noteMark(numbers.get(note)), link.parentNode));
+  }
+  return notes;
+}
+
+// Текст примечания — одной строкой, без обратных ссылок и без ведущего знака
+// сноски («1», «[1]», «1.», «1)»).
+function noteText(note, link, backlinks) {
+  for (const anchor of note.querySelectorAll('a')) {
+    if (backlinks.has(anchor)) anchor.remove();
+  }
+  const text = cleanInline(renderInline(note).replace(/\n/g, ' '));
+  const sign = link.text.replace(/\s/g, '').replace(/^\[(.*)\]$/, '$1');
+  if (!sign) return text;
+  const escaped = sign.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const lead = new RegExp(`^(?:\\[${escaped}\\]|${escaped}[.)]?)(?![\\p{L}\\p{N}*.)])`, 'u');
+  return text.replace(lead, '').replace(EDGE_SPACE, '');
 }
 
 function collectBlocks(element, out) {
@@ -182,9 +218,11 @@ function collapse(text) {
 
 // Внутри блока пустых строк нет: пустая строка делит абзацы (Б-04), а один абзац
 // исходника — один ¶. Поэтому <br><br> и строфы в одном <p> — один перенос; пустой
-// считается и строка из одних пробелов, в том числе неразрывных.
+// считается и строка из одних пробелов, в том числе неразрывных. Метка сноски
+// прилегает к слову: пробелы перед ней убираются.
 function cleanInline(text) {
   return text
+    .replace(SPACE_BEFORE_MARK, '')
     .replace(/ *\n */g, '\n')
     .replace(/\n(?:[^\S\n]*\n)+/g, '\n')
     .replace(/ {2,}/g, ' ')
