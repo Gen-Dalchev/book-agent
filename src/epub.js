@@ -3,6 +3,7 @@
 import path from 'node:path';
 import JSZip from 'jszip';
 import { XMLParser } from 'fast-xml-parser';
+import { parse as parseHtml } from 'node-html-parser';
 import { ImportError } from './errors.js';
 
 const HTML_MEDIA_TYPES = new Set(['application/xhtml+xml', 'text/html']);
@@ -14,7 +15,7 @@ const xmlParser = new XMLParser({
   parseTagValue: false,
   parseAttributeValue: false,
   isArray: (name) => [
-    'rootfile', 'item', 'itemref',
+    'rootfile', 'item', 'itemref', 'reference',
     'title', 'creator', 'contributor', 'language', 'publisher', 'date', 'identifier', 'meta',
   ].includes(name),
 });
@@ -34,8 +35,16 @@ const MIN_YEAR = 1450;
  */
 
 /**
+ * Ссылка на документ с типом из разметки: EPUB 3 — <nav epub:type="landmarks">,
+ * EPUB 2 — <guide> в OPF. href — путь в архиве, без фрагмента.
+ * @typedef {{href: string, fragment: boolean, type: string}} Landmark
+ */
+
+/**
  * @param {Uint8Array} data содержимое файла .epub
- * @returns {Promise<{metadata: Metadata, documents: {href: string, html: string}[]}>}
+ * @returns {Promise<{metadata: Metadata,
+ *   documents: {href: string, html: string, linear: boolean}[],
+ *   landmarks: Landmark[], guide: Landmark[]}>}
  */
 export async function readEpub(data) {
   let zip;
@@ -85,10 +94,40 @@ export async function readEpub(data) {
     if (html === null) {
       throw new ImportError(`EPUB повреждён: в архиве нет файла главы ${href}.`);
     }
-    documents.push({ href, html });
+    documents.push({ href, html, linear: itemref['@_linear'] !== 'no' });
   }
 
-  return { metadata, documents };
+  const guide = (pkg.guide?.reference ?? []).map((reference) => landmark(opfDir, reference['@_href'], reference['@_type']));
+  const landmarks = await readLandmarks(zip, opfDir, [...manifest.values()]);
+  return { metadata, documents, landmarks, guide };
+}
+
+// Документ навигации EPUB 3 — элемент манифеста со свойством nav. Его может не быть.
+async function readLandmarks(zip, opfDir, items) {
+  const navItem = items.find((item) => String(item['@_properties'] ?? '').split(/\s+/).includes('nav'));
+  if (!navItem) return [];
+  const navHref = resolveHref(opfDir, navItem['@_href']);
+  const html = await readText(zip, navHref);
+  if (html === null) return [];
+  const navDir = path.posix.dirname(navHref);
+  const landmarks = [];
+  for (const nav of parseHtml(html).querySelectorAll('nav')) {
+    if (!epubTypes(nav).includes('landmarks')) continue;
+    for (const link of nav.querySelectorAll('a')) {
+      const type = epubTypes(link)[0];
+      if (link.getAttribute('href') && type) landmarks.push(landmark(navDir, link.getAttribute('href'), type));
+    }
+  }
+  return landmarks;
+}
+
+function landmark(baseDir, href = '', type = '') {
+  return { href: resolveHref(baseDir, href), fragment: href.includes('#'), type: String(type).trim().toLowerCase() };
+}
+
+/** Значения epub:type элемента разметки, через пробел. */
+export function epubTypes(element) {
+  return (element.getAttribute('epub:type') ?? '').toLowerCase().split(/\s+/).filter(Boolean);
 }
 
 async function readText(zip, name) {
@@ -186,7 +225,8 @@ function textOf(value) {
   return '';
 }
 
-function resolveHref(baseDir, href = '') {
+/** Ссылка из документа или OPF → путь в архиве, без фрагмента. */
+export function resolveHref(baseDir, href = '') {
   const clean = href.split('#')[0];
   let decoded;
   try {
