@@ -29,6 +29,19 @@ function markFor(id) {
   return `${MARK_OPEN}${digits.join('')}${MARK_CLOSE}`;
 }
 
+function markId(digits) {
+  return Number([...digits].map((char) => char.charCodeAt(0) - DIGIT_BASE).join(''));
+}
+
+/**
+ * Номера меток плюс offset: тексты нескольких документов в одной части, сноски
+ * следующего документа идут после сносок предыдущего.
+ */
+export function shiftMarks(text, offset) {
+  if (offset === 0) return text;
+  return text.replace(MARK, (_whole, space, digits) => `${space}${markFor(markId(digits) + offset)}`);
+}
+
 /** Текст блока без меток — для заголовков в оглавлении и первых слов страницы. */
 export function plain(text) {
   return text.replace(MARK, '');
@@ -45,7 +58,7 @@ export function numberMarks(texts, notes) {
   const labels = new Map();
   const definitions = [];
   const numbered = texts.map((text) => text.replace(MARK, (_whole, _space, digits) => {
-    const id = Number([...digits].map((char) => char.charCodeAt(0) - DIGIT_BASE).join(''));
+    const id = markId(digits);
     if (!labels.has(id)) {
       labels.set(id, labels.size + 1);
       definitions.push(`[^${labels.size}]: ${notes[id]}`);

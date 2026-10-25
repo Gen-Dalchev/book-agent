@@ -8,7 +8,7 @@
 // Сноски: в тексте блоков — метки (footnotes.js), в части они получают номера [^N]
 // по порядку появления, а определения идут одним блоком в конце файла части.
 import { countWords } from './words.js';
-import { numberMarks, plain } from './footnotes.js';
+import { numberMarks, plain, shiftMarks } from './footnotes.js';
 
 const HAS_TEXT = /[\p{L}\p{N}]/u;
 const FALLBACK_TITLE_WORDS = 8;
@@ -43,12 +43,7 @@ export function splitDocument({ blocks, notes = [] }) {
     const marks = block === titleBlock ? '#' : block.level <= subLevel ? '##' : '###';
     return `${marks} ${block.text}`;
   };
-  const makePart = (kind, partTitle, partBlocks) => {
-    const { texts, definitions } = numberMarks(partBlocks.map(toMarkdown), notes);
-    const body = texts.join('\n\n');
-    const markdown = definitions.length > 0 ? `${body}\n\n${definitions.join('\n')}\n` : `${body}\n`;
-    return { kind, title: plain(partTitle), markdown, words: countWords(markdown), footnotes: definitions.length };
-  };
+  const makePart = (kind, partTitle, partBlocks) => renderPart(kind, partTitle, partBlocks.map(toMarkdown), notes);
 
   if (sectionLevel === null) {
     return { title, parts: [makePart('whole', title, blocks)] };
@@ -73,6 +68,52 @@ export function splitDocument({ blocks, notes = [] }) {
     start = end;
   }
   return { title, parts };
+}
+
+/**
+ * Глава из нескольких документов: часть — свой документ и, если есть, его продолжения
+ * (документы без своего заголовка в структуре книги). EPUB так собирает часть книги
+ * из оглавления, где её главы — отдельные файлы.
+ * В части-разделе её заголовок — «##»: первый блок первого документа, если он заголовок,
+ * иначе title; остальные заголовки — «###», частей они не делят. В начале (intro) заголовков
+ * «##» нет. Заголовок главы «#» — в начале первой части.
+ * @param {string} title название главы
+ * @param {{kind: 'intro' | 'section', title: string, fixed?: boolean,
+ *   documents: {blocks: Block[], notes?: string[]}[]}[]} sections в порядке чтения;
+ *   fixed — в оглавлении title, даже если у части есть свой заголовок
+ * @returns {Chapter}
+ */
+export function joinChapter(title, sections) {
+  const parts = sections.map((section, index) => {
+    const lines = index === 0 ? [`# ${title}`] : [];
+    const notes = [];
+    let partTitle = section.title;
+    section.documents.forEach((doc, docIndex) => {
+      const offset = notes.length;
+      notes.push(...(doc.notes ?? []));
+      doc.blocks.forEach((block, blockIndex) => {
+        const text = shiftMarks(block.text, offset);
+        const opens = section.kind === 'section' && docIndex === 0 && blockIndex === 0;
+        if (opens && block.type === 'heading') {
+          lines.push(`## ${text}`);
+          if (!section.fixed) partTitle = block.text;
+        } else {
+          if (opens) lines.push(`## ${section.title}`);
+          lines.push(block.type === 'heading' ? `### ${text}` : text);
+        }
+      });
+    });
+    return renderPart(section.kind, partTitle, lines, notes);
+  });
+  return { title, parts };
+}
+
+// Тексты блоков части в markdown → файл части: блоки через пустую строку, сноски — в конце.
+function renderPart(kind, title, texts, notes) {
+  const { texts: numbered, definitions } = numberMarks(texts, notes);
+  const body = numbered.join('\n\n');
+  const markdown = definitions.length > 0 ? `${body}\n\n${definitions.join('\n')}\n` : `${body}\n`;
+  return { kind, title: plain(title), markdown, words: countWords(markdown), footnotes: definitions.length };
 }
 
 function headingLevels(blocks) {

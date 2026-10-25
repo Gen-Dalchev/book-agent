@@ -21,7 +21,7 @@ export async function importBook(inputPath, outDir, options = {}) {
   if (format === 'pdf') return importPdfData(data, outDir);
   // Файл .epub, который не zip, разбор EPUB встречает своей ошибкой — как и раньше.
   if (format === 'epub' || path.extname(inputPath).toLowerCase() === '.epub') {
-    return { ...(await importEpubData(data, outDir, options)), warnings: [] };
+    return importEpubData(data, outDir, options);
   }
   throw new ImportError('Файл не похож на PDF или EPUB.');
 }

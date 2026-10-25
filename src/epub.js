@@ -17,6 +17,7 @@ const xmlParser = new XMLParser({
   isArray: (name) => [
     'rootfile', 'item', 'itemref', 'reference',
     'title', 'creator', 'contributor', 'language', 'publisher', 'date', 'identifier', 'meta',
+    'navPoint',
   ].includes(name),
 });
 
@@ -41,10 +42,17 @@ const MIN_YEAR = 1450;
  */
 
 /**
+ * Пункт оглавления книги: текст, файл ссылки (путь в архиве без фрагмента; нет ссылки — null)
+ * и вложенные пункты.
+ * @typedef {{title: string, href: string | null, children: TocItem[]}} TocItem
+ */
+
+/**
  * @param {Uint8Array} data содержимое файла .epub
  * @returns {Promise<{metadata: Metadata,
  *   documents: {href: string, html: string, linear: boolean}[],
- *   landmarks: Landmark[], guide: Landmark[]}>}
+ *   landmarks: Landmark[], guide: Landmark[], toc: TocItem[]}>}
+ *   toc — оглавление: EPUB 3 — <nav epub:type="toc">, нет его — NCX (EPUB 2); нет обоих — []
  */
 export async function readEpub(data) {
   let zip;
@@ -98,27 +106,79 @@ export async function readEpub(data) {
   }
 
   const guide = (pkg.guide?.reference ?? []).map((reference) => landmark(opfDir, reference['@_href'], reference['@_type']));
-  const landmarks = await readLandmarks(zip, opfDir, [...manifest.values()]);
-  return { metadata, documents, landmarks, guide };
+  const nav = await readNav(zip, opfDir, [...manifest.values()]);
+  const toc = nav.toc ?? await readNcx(zip, opfDir, manifest.get(pkg.spine['@_toc']));
+  return { metadata, documents, landmarks: nav.landmarks, guide, toc };
 }
 
 // Документ навигации EPUB 3 — элемент манифеста со свойством nav. Его может не быть.
-async function readLandmarks(zip, opfDir, items) {
+// toc — null, если в нём нет <nav epub:type="toc">.
+async function readNav(zip, opfDir, items) {
   const navItem = items.find((item) => String(item['@_properties'] ?? '').split(/\s+/).includes('nav'));
-  if (!navItem) return [];
+  if (!navItem) return { landmarks: [], toc: null };
   const navHref = resolveHref(opfDir, navItem['@_href']);
   const html = await readText(zip, navHref);
-  if (html === null) return [];
+  if (html === null) return { landmarks: [], toc: null };
   const navDir = path.posix.dirname(navHref);
   const landmarks = [];
+  let toc = null;
   for (const nav of parseHtml(html).querySelectorAll('nav')) {
-    if (!epubTypes(nav).includes('landmarks')) continue;
+    const types = epubTypes(nav);
+    if (types.includes('toc') && toc === null) {
+      const list = nav.querySelector('ol, ul');
+      toc = list ? navItems(list, navDir) : [];
+    }
+    if (!types.includes('landmarks')) continue;
     for (const link of nav.querySelectorAll('a')) {
       const type = epubTypes(link)[0];
       if (link.getAttribute('href') && type) landmarks.push(landmark(navDir, link.getAttribute('href'), type));
     }
   }
-  return landmarks;
+  return { landmarks, toc };
+}
+
+// Пункт — <li>: текст ссылки или <span> целиком и вложенный список.
+function navItems(list, navDir) {
+  const children = (element, tags) => element.childNodes.filter((node) => tags.includes(node.rawTagName?.toLowerCase()));
+  return children(list, ['li']).map((li) => {
+    const label = children(li, ['a', 'span'])[0];
+    const href = label?.rawTagName.toLowerCase() === 'a' ? label.getAttribute('href') : null;
+    const nested = children(li, ['ol', 'ul'])[0];
+    return {
+      title: oneLine(label?.text ?? ''),
+      href: href ? resolveHref(navDir, href) : null,
+      children: nested ? navItems(nested, navDir) : [],
+    };
+  });
+}
+
+// NCX (EPUB 2): spine@toc → элемент манифеста → navMap. Нет или не читается — оглавления нет.
+async function readNcx(zip, opfDir, item) {
+  if (!item?.['@_href']) return [];
+  const ncxHref = resolveHref(opfDir, item['@_href']);
+  const xml = await readText(zip, ncxHref);
+  if (xml === null) return [];
+  let parsed;
+  try {
+    parsed = xmlParser.parse(xml);
+  } catch {
+    return [];
+  }
+  const ncxDir = path.posix.dirname(ncxHref);
+  const points = (list = []) => list.map((point) => {
+    const label = [point.navLabel].flat()[0];
+    const src = [point.content].flat()[0]?.['@_src'];
+    return {
+      title: oneLine(textOf([label?.text].flat()[0])),
+      href: src ? resolveHref(ncxDir, src) : null,
+      children: points(point.navPoint),
+    };
+  });
+  return points(parsed?.ncx?.navMap?.navPoint);
+}
+
+function oneLine(text) {
+  return text.replace(/\s+/g, ' ').trim();
 }
 
 function landmark(baseDir, href = '', type = '') {
