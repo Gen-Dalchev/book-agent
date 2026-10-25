@@ -8,7 +8,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildEpub, xhtml } from './helpers/epub-builder.js';
 import { buildPdf } from './helpers/pdf-builder.js';
-import { BOOK_PDF } from './fixtures/make-book-pdf.js';
+import { BOOK_PDF, EDGES_PDF } from './fixtures/make-book-pdf.js';
 
 const CLI = fileURLToPath(new URL('../bin/import.js', import.meta.url));
 
@@ -73,6 +73,27 @@ test('книга из PDF: главы и подглавы по закладка�
   assert.equal(await read(out, 'parts/003-01.md'), '## Вечер\n\nКороткий абзац вечера, тоже в две строки.\n');
   // Закладка третьего уровня («Глубже») текст не делит и заголовка не даёт.
   assert.equal(await read(out, 'parts/003-02.md'), '## Ночь\n\nПоследний абзац всей книги кончается тут.\n');
+});
+
+test('колонтитулы и номера страниц убраны, год остался, переносы склеены', async () => {
+  const out = path.join(tmp, 'edges');
+  const result = runImport(EDGES_PDF, out);
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(await readdir(path.join(out, 'parts')), ['001.md', '002.md']);
+  assert.equal(await read(out, 'parts/001.md'), [
+    '# Первая часть',
+    'Колонтитулы стоят у краёв страницы, а текст между ними идёт своим чередом, и переносы в нём склеиваются.',
+    'Если кто-нибудь спросит, зачем это нужно, ответ простой: чтобы читать без помех. Слово на границе страниц тоже склеится.',
+    'Год внизу этой страницы — не номер страницы, он остаётся.',
+    '1924',
+    'Мягкий перенос внутри строки исчезает, слово остаётся целым.',
+  ].join('\n\n') + '\n');
+  // «well-» + «known» → «wellknown» — принятая ошибка: составное слово на своём дефисе склеивается.
+  assert.equal(await read(out, 'parts/002.md'), [
+    '# Вторая часть',
+    'Здесь у верхнего края нет колонтитула, а внизу он есть.',
+    'The last page is in English: a wellknown word and a hyphenated one are both joined.',
+  ].join('\n\n') + '\n');
 });
 
 test('ключ --all на PDF ничего не меняет', async () => {

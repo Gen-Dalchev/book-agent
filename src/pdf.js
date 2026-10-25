@@ -1,5 +1,6 @@
 // Чтение PDF библиотекой pdfjs-dist (Б-05): сведения о книге, куски текста страниц, закладки.
 // Здесь только разбор файла; строки и абзацы собирает pdf-text.js, главы — pdf-chapters.js.
+// Края страниц нужны, чтобы найти колонтитулы и номера страниц (pdf-clean.js).
 import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { ImportError } from './errors.js';
 
@@ -10,6 +11,7 @@ const VERBOSITY_ERRORS = 0;
  * @param {Uint8Array} data содержимое файла .pdf
  * @returns {Promise<{metadata: import('./epub.js').Metadata,
  *   pages: import('./pdf-text.js').TextItem[][],
+ *   boxes: import('./pdf-clean.js').PageBox[],
  *   bookmarks: import('./pdf-chapters.js').Bookmark[]}>} bookmarks пустой — закладок нет
  */
 export async function readPdf(data) {
@@ -35,15 +37,18 @@ export async function readPdf(data) {
   try {
     const { info } = await doc.getMetadata().catch(() => ({ info: {} }));
     const pages = [];
+    const boxes = [];
     for (let number = 1; number <= doc.numPages; number += 1) {
       const page = await doc.getPage(number);
       const content = await page.getTextContent();
       pages.push(content.items.filter((item) => typeof item.str === 'string'));
+      // view — видимая область страницы [x0, y0, x1, y1].
+      boxes.push({ bottom: Math.min(page.view[1], page.view[3]), top: Math.max(page.view[1], page.view[3]) });
       page.cleanup();
     }
     const outline = (await doc.getOutline().catch(() => null)) ?? [];
     const bookmarks = await resolveBookmarks(doc, outline, 1);
-    return { metadata: readMetadata(info ?? {}), pages, bookmarks };
+    return { metadata: readMetadata(info ?? {}), pages, boxes, bookmarks };
   } catch (cause) {
     if (cause instanceof ImportError) throw cause;
     throw new ImportError('PDF повреждён: не удалось прочитать страницы.', { cause });
