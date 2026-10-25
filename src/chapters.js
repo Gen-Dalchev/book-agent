@@ -80,7 +80,8 @@ function repeatedTopLevel(blocks) {
 }
 
 // Документ без заголовка в начале: подписываем главу её первыми словами.
-function fallbackTitle(blocks) {
+// Так же подписан пропущенный документ в «Пропущено».
+export function fallbackTitle(blocks) {
   const first = blocks.find((block) => HAS_TEXT.test(block.text));
   const words = first.text.replace(/[*`#>]/g, '').split(/\s+/u).filter(Boolean);
   const head = words.slice(0, FALLBACK_TITLE_WORDS).join(' ');

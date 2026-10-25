@@ -14,10 +14,12 @@ export function partId(chapterNumber, subNumber = null) {
 
 /**
  * @param {{metadata: import('./epub.js').Metadata,
- *   chapters: import('./chapters.js').Chapter[]}} book
+ *   chapters: import('./chapters.js').Chapter[],
+ *   skipped?: {file: string, start: string, reason: string}[]}} book
+ *   skipped — служебные страницы: файл в архиве, первые слова, причина
  * @returns {{files: {path: string, content: string}[], chapterCount: number, partCount: number}}
  */
-export function planBook({ metadata, chapters }) {
+export function planBook({ metadata, chapters, skipped = [] }) {
   const files = [];
   const rows = [];
 
@@ -45,12 +47,12 @@ export function planBook({ metadata, chapters }) {
   const partCount = files.length;
   files.unshift({
     path: INDEX_FILE,
-    content: renderIndex(metadata, chapters.length, partCount, rows),
+    content: renderIndex(metadata, chapters.length, partCount, rows, skipped),
   });
   return { files, chapterCount: chapters.length, partCount };
 }
 
-function renderIndex(metadata, chapterCount, partCount, rows) {
+function renderIndex(metadata, chapterCount, partCount, rows, skipped) {
   const list = (values = []) => values.join(', ') || 'не указан';
   const lines = [
     `# ${metadata.title || 'Без названия'}`,
@@ -70,6 +72,16 @@ function renderIndex(metadata, chapterCount, partCount, rows) {
     '| --- | --- | --- | ---: |',
     ...rows.map((row) => `| ${row.map(cell).join(' | ')} |`),
   ];
+  if (skipped.length > 0) {
+    lines.push(
+      '',
+      '## Пропущено',
+      '',
+      '| Файл | Начало | Причина |',
+      '| --- | --- | --- |',
+      ...skipped.map((page) => `| ${[page.file, page.start, page.reason].map(cell).join(' | ')} |`),
+    );
+  }
   return `${lines.join('\n')}\n`;
 }
 
