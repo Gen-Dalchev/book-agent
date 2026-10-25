@@ -1,6 +1,7 @@
 // Ссылки на место в книге: «003-02 ¶12», «003 ¶1–40» (Б-04). Номер абзаца считается
 // по файлу части, а не по внутренностям импорта: файл делится на блоки по пустой
 // строке; блок кода в ``` — один блок; заголовки и разделители не считаются;
+// блок определений сносок в конце файла (каждая строка — «[^N]: ») тоже не считается (Б-07);
 // остальные блоки — абзацы, по порядку с 1. Этот счёт — мерило нумерации.
 import { readdir, readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
@@ -15,9 +16,10 @@ const BLANK = /^\s*$/;
 const FENCE = /^```/;
 const HEADING = /^#{1,6} /;
 const SEPARATOR = /^(?:---|\*\*\*|\* \* \*)$/;
+const DEFINITION = /^\[\^\d+\]: /;
 
 /**
- * @typedef {{kind: 'paragraph' | 'heading' | 'separator', text: string, number?: number}} Block
+ * @typedef {{kind: 'paragraph' | 'heading' | 'separator' | 'definitions', text: string, number?: number}} Block
  * @typedef {{part: string, from: number | null, to: number | null}} Ref
  *   from и to — null, когда нужна вся часть
  */
@@ -44,6 +46,10 @@ export function splitBlocks(markdown) {
     lines.push(line);
   }
   flush();
+  const last = blocks.at(-1);
+  if (last?.kind === 'paragraph' && last.text.split('\n').every((line) => DEFINITION.test(line))) {
+    last.kind = 'definitions';
+  }
   let number = 0;
   for (const block of blocks) {
     if (block.kind === 'paragraph') block.number = ++number;

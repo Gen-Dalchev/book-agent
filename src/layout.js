@@ -45,14 +45,16 @@ export function planBook({ metadata, chapters, skipped = [] }) {
   });
 
   const partCount = files.length;
+  const footnoteCount = chapters.reduce(
+    (sum, chapter) => sum + chapter.parts.reduce((inner, part) => inner + (part.footnotes ?? 0), 0), 0);
   files.unshift({
     path: INDEX_FILE,
-    content: renderIndex(metadata, chapters.length, partCount, rows, skipped),
+    content: renderIndex(metadata, chapters.length, partCount, footnoteCount, rows, skipped),
   });
   return { files, chapterCount: chapters.length, partCount };
 }
 
-function renderIndex(metadata, chapterCount, partCount, rows, skipped) {
+function renderIndex(metadata, chapterCount, partCount, footnoteCount, rows, skipped) {
   const list = (values = []) => values.join(', ') || 'не указан';
   const lines = [
     `# ${metadata.title || 'Без названия'}`,
@@ -65,6 +67,7 @@ function renderIndex(metadata, chapterCount, partCount, rows, skipped) {
     `- ISBN: ${list(metadata.isbns)}`,
     `- Глав: ${chapterCount}`,
     `- Частей: ${partCount}`,
+    `- Сносок: ${footnoteCount}`,
     '',
     '## Оглавление',
     '',
