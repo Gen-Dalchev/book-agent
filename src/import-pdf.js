@@ -17,7 +17,7 @@ export async function importPdfData(data, outDir) {
   // pdfjs тяжёлый — грузим его, только когда пришёл PDF.
   const { readPdf } = await import('./pdf.js');
   const book = await readPdf(data);
-  const lines = textLines(book.pages);
+  const lines = textLines(book.pages, book.boxes);
   if (lines.length === 0) {
     throw new ImportError('В PDF нет текстового слоя — похоже на скан; такие пока не поддерживаются.');
   }

@@ -12,7 +12,9 @@ const LEADING = 1.4;
 
 /**
  * Строка страницы: текст, отступ первой строки абзаца, лишний промежуток перед строкой, размер шрифта.
- * @typedef {{text: string, indent?: boolean, gap?: number, size?: number}} Row
+ * at — строка вне потока текста, в заданном месте (нижняя линия): колонтитул, номер страницы.
+ * Страница — 400 × 500, текст идёт от 450 вниз.
+ * @typedef {{text: string, indent?: boolean, gap?: number, size?: number, at?: {x?: number, y: number}}} Row
  * Закладка: страница и строка (с 0), на верх которой она указывает; без line — страница целиком.
  * name — назначение именованное (через /Names), а не явное.
  * @typedef {{title: string, page: number, line?: number, name?: string, children?: Bookmark[]}} Bookmark
@@ -31,6 +33,7 @@ export async function buildPdf({ pages, bookmarks = [], title, author, fontFile 
   if (fontFile) {
     doc.registerFontkit(fontkit);
     font = await doc.embedFont(await readFile(fontFile), { subset: true });
+    keepSoftHyphen(font);
   } else {
     font = await doc.embedFont(StandardFonts.Helvetica);
   }
@@ -40,8 +43,14 @@ export async function buildPdf({ pages, bookmarks = [], title, author, fontFile 
   const tops = pages.map((rows) => {
     const page = doc.addPage([PAGE.width, PAGE.height]);
     let y = TOP;
-    return rows.map(({ text, indent = false, gap = 0, size = 12 }, index) => {
-      const top = index === 0 ? y : y - gap;
+    let first = true;
+    return rows.map(({ text, indent = false, gap = 0, size = 12, at }) => {
+      if (at) {
+        page.drawText(text, { x: at.x ?? LEFT, y: at.y, size, font });
+        return at.y + size;
+      }
+      const top = first ? y : y - gap;
+      first = false;
       y = top - size;
       page.drawText(text, { x: indent ? INDENT : LEFT, y, size, font });
       y -= size * (LEADING - 1);
@@ -50,6 +59,18 @@ export async function buildPdf({ pages, bookmarks = [], title, author, fontFile 
   });
   if (bookmarks.length > 0) addOutline(doc, bookmarks, tops);
   return doc.save();
+}
+
+// fontkit при раскладке строки заменяет мягкий перенос (U+00AD) пробелом нулевой ширины — в тексте
+// PDF вышел бы пробел. В настоящих книгах в тексте PDF стоит сам U+00AD — оставляем его.
+function keepSoftHyphen(font) {
+  const engine = Object.getPrototypeOf(font.embedder.font._layoutEngine);
+  if (engine.keepsSoftHyphen) return;
+  const isDefaultIgnorable = engine.isDefaultIgnorable;
+  engine.isDefaultIgnorable = function (ch) {
+    return ch !== 0x00AD && isDefaultIgnorable.call(this, ch);
+  };
+  engine.keepsSoftHyphen = true;
 }
 
 function addOutline(doc, bookmarks, tops) {

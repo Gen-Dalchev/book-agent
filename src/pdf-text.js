@@ -4,7 +4,9 @@
 // Строка — куски с одной высотой на странице (transform[5]); hasEOL обрывает строку.
 // Новый абзац — промежуток между строками больше обычного для страницы в 1,5 раза
 // или отступ первой строки. Первая строка страницы без отступа продолжает абзац
-// с прошлой страницы. Колонтитулы, номера страниц и переносы здесь пока не убираются.
+// с прошлой страницы. Колонтитулы и номера страниц убираются до разбора на абзацы,
+// переносы склеиваются при сборке абзаца (pdf-clean.js).
+import { joinLines, removeRunningLines, removeSoftHyphens } from './pdf-clean.js';
 
 const GAP_FACTOR = 1.5;
 // Отступ первой строки — сдвиг вправо от левого края страницы больше 0,8 высоты шрифта.
@@ -18,12 +20,12 @@ const INDENT_EM = 0.8;
 
 /**
  * @param {TextItem[][]} pages куски текста по страницам, в порядке страниц
+ * @param {import('./pdf-clean.js').PageBox[]} [boxes] края страниц; без них колонтитулы не ищутся
  * @returns {Line[]} непустые строки всей книги по порядку
  */
-export function textLines(pages) {
+export function textLines(pages, boxes = []) {
   const lines = [];
-  pages.forEach((items, page) => {
-    const pageLines = splitLines(items);
+  removeRunningLines(pages.map(splitLines), boxes).forEach((pageLines, page) => {
     const left = Math.min(...pageLines.map((line) => line.x));
     const normalGap = median(gaps(pageLines).filter((gap) => gap > 0));
     pageLines.forEach((line, index) => {
@@ -75,7 +77,7 @@ function median(values) {
 }
 
 /**
- * Строки куска книги → абзацы: строки одного абзаца склеены через пробел.
+ * Строки куска книги → абзацы: строки одного абзаца склеены через пробел, переносы — без дефиса.
  * Первая строка куска всегда начинает абзац.
  * @param {Line[]} lines
  * @returns {string[]}
@@ -84,7 +86,7 @@ export function paragraphs(lines) {
   const result = [];
   lines.forEach((line, index) => {
     if (index === 0 || line.start) result.push(line.text);
-    else result[result.length - 1] += ` ${line.text}`;
+    else result[result.length - 1] = joinLines(result[result.length - 1], line.text);
   });
-  return result;
+  return result.map(removeSoftHyphens);
 }
