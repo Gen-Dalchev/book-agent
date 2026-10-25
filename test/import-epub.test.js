@@ -189,5 +189,5 @@ test('пустая папка назначения подходит', async () =
 test('без аргументов — подсказка, как запускать', () => {
   const result = spawnSync(process.execPath, [CLI], { encoding: 'utf8' });
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /npm run import -- <файл\.epub> <папка>/);
+  assert.match(result.stderr, /npm run import -- <файл\.epub\|файл\.pdf> <папка>/);
 });
