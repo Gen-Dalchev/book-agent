@@ -1,10 +1,11 @@
 // XHTML главы → плоский список блоков: заголовки (с уровнем из h1–h6) и текстовые
 // блоки в markdown (абзацы, списки, цитаты). Простой обход дерева: курсив и жирный
 // сохраняются, картинки, стили и скрипты отбрасываются, остальное — текстом.
-// Сноски внутри документа (footnotes.js) заменяются метками, а примечания в блоки
-// не попадают: их тексты отдаются отдельно.
+// Сноски (footnotes.js) заменяются метками, а примечания в блоки не попадают:
+// их тексты отдаются отдельно. Сноски в другой файл видны, только когда документы
+// книги разбираются разом (documentsToBlocks).
 import { parse } from 'node-html-parser';
-import { extractFootnotes } from './footnotes.js';
+import { extractBookFootnotes, extractFootnotes } from './footnotes.js';
 import { ELEMENT, TEXT, HEADING_LEVELS, SKIP, BLOCK, tagOf } from './html-tags.js';
 
 const ITALIC = new Set(['em', 'i', 'cite', 'dfn', 'var']);
@@ -29,17 +30,43 @@ let hidden = NOTHING;
  *   notes — тексты сносок; в тексте блоков сноска — служебная метка (footnotes.js)
  */
 export function htmlToBlocks(html, { href = null } = {}) {
+  const { title, body } = parseDocument(html);
+  const { notes } = extractFootnotes(body, { href, render: renderHiding });
+  return { title, blocks: bodyBlocks(body), notes };
+}
+
+/**
+ * Все документы книги разом: сноски ищутся и в другом документе (footnotes.js).
+ * @param {{html: string, href: string}[]} documents в порядке чтения
+ * @param {{closed?: Set<string>}} [options] closed — служебные документы: ссылка в них — не сноска
+ * @returns {{title: string, blocks: import('./chapters.js').Block[], notes: string[], notesFile: boolean}[]}
+ *   notesFile — из документа вырезано примечание по сноске из другого документа
+ */
+export function documentsToBlocks(documents, { closed = new Set() } = {}) {
+  const parsed = documents.map(({ html, href }) => ({ href, ...parseDocument(html) }));
+  const found = extractBookFootnotes(parsed, { closed, render: renderHiding });
+  return parsed.map(({ title, body }, index) => ({ title, blocks: bodyBlocks(body), ...found[index] }));
+}
+
+/** Блоки документа как есть, без разбора сносок: ссылки остаются текстом, примечания — на месте. */
+export function blocksWithoutFootnotes(html) {
+  return bodyBlocks(parseDocument(html).body);
+}
+
+function parseDocument(html) {
   const root = parse(html, {
     lowerCaseTagName: true,
     comment: false,
     blockTextElements: { script: true, style: true },
   });
   const title = cleanInline(root.querySelector('title')?.text ?? '').replace(/\n/g, ' ');
-  const body = root.querySelector('body') ?? root;
-  const { notes } = extractFootnotes(body, { href, render: renderHiding });
+  return { title, body: root.querySelector('body') ?? root };
+}
+
+function bodyBlocks(body) {
   const blocks = [];
   collectBlocks(body, blocks);
-  return { title, blocks, notes };
+  return blocks;
 }
 
 function renderHiding(element, nodes) {
