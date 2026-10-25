@@ -16,6 +16,13 @@ if (args.length < 2) {
 const base = process.env.INIT_CWD ?? process.cwd();
 const bookDir = path.resolve(base, args[0]);
 
+// Вывод закрыли раньше конца (… | head) — читателю хватило, это не ошибка.
+// Ошибка записи приходит событием потока, мимо catch ниже; прочие — как раньше.
+process.stdout.on('error', (error) => {
+  if (error.code === 'EPIPE') process.exit(0);
+  throw error;
+});
+
 try {
   const ref = parseRef(args.slice(1).join(' '));
   process.stdout.write(await showRef(bookDir, ref));
