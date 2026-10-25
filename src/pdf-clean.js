@@ -39,9 +39,10 @@ export function removeRunningLines(pageLines, boxes) {
   const edges = pageLines.map((lines, page) => lines.map((line) => edgeOf(line, boxes[page])));
   const headers = runningHeaders(pageLines, edges);
   const numbers = pageNumbers(pageLines, edges);
+  const moved = movedHeaders(pageLines, edges, headers);
   return pageLines.map((lines, page) => lines.filter((line, index) => {
     const edge = edges[page][index];
-    return !edge || !(headers.has(headerKey(edge, line.text)) || numbers.has(line));
+    return !edge || !(headers.has(headerKey(edge, line.text)) || numbers.has(line) || moved.has(line));
   }));
 }
 
@@ -83,6 +84,47 @@ function runningHeaders(pageLines, edges) {
     }
   }
   return found;
+}
+
+// Колонтитул с номером страницы, который на отдельной странице стоит у другого края (так бывает
+// на первой странице у Word): тот же текст с числами на тех же местах, а сдвиг последнего числа
+// от номера страницы в файле — как у колонтитула на другой странице. Строка без числа или с числом
+// не из ряда (титул с названием книги) остаётся.
+function movedHeaders(pageLines, edges, headers) {
+  // Край и вид колонтитула → сдвиг последнего числа → страницы.
+  const shifts = new Map();
+  pageLines.forEach((lines, page) => lines.forEach((line, index) => {
+    const edge = edges[page][index];
+    if (!edge || !headers.has(headerKey(edge, line.text))) return;
+    const shift = lastNumberShift(line.text, page);
+    if (shift === null) return;
+    const key = `${edge}\n${numberPattern(line.text)}`;
+    const pages = shifts.get(key) ?? new Map();
+    pages.set(shift, (pages.get(shift) ?? new Set()).add(page));
+    shifts.set(key, pages);
+  }));
+  const found = new Set();
+  pageLines.forEach((lines, page) => lines.forEach((line, index) => {
+    const edge = edges[page][index];
+    if (!edge) return;
+    const shift = lastNumberShift(line.text, page);
+    if (shift === null) return;
+    const other = edge === 'top' ? 'bottom' : 'top';
+    const pages = shifts.get(`${other}\n${numberPattern(line.text)}`)?.get(shift);
+    if (pages && [...pages].some((header) => header !== page)) found.add(line);
+  }));
+  return found;
+}
+
+// Вид строки, где каждое число заменено одним знаком: «Глава 3, с. 12» → «Глава 0, с. 0».
+function numberPattern(text) {
+  return text.replace(/\p{Nd}+/gu, '0').replace(/\s+/gu, ' ').trim();
+}
+
+// Последнее число строки минус номер страницы в файле; нет числа (или оно не из цифр 0–9) — null.
+function lastNumberShift(text, page) {
+  const number = Number(text.match(/\p{Nd}+/gu)?.at(-1));
+  return Number.isNaN(number) ? null : number - page;
 }
 
 // Номер страницы — число у края, у которого на соседней странице есть число с тем же сдвигом
