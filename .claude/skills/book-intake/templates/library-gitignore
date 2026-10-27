@@ -1,0 +1,14 @@
+# Исходные файлы книг — вне git (Б-01): их хранит владелец.
+*.epub
+*.pdf
+*.fb2
+*.zip
+*.7z
+*.rar
+*.djvu
+*.mobi
+*.azw3
+*.doc
+*.docx
+
+.DS_Store
