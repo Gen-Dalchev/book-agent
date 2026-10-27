@@ -32,7 +32,8 @@ const EDGE_SPACE = /^ +| +$/g;
 const HAS_TEXT = /[\p{L}\p{N}]/u;
 // Остальные строчные (strikethrough, sub, sup, style, a) — только текст: сноски — #46.
 const MARKERS = { emphasis: '*', strong: '**', code: '`' };
-const NOTHING = new Set(['image', 'empty-line', 'binary']);
+// Не импортируются (Б-14): картинки, аннотация — и у книги, и у раздела.
+const NOTHING = new Set(['image', 'empty-line', 'binary', 'annotation']);
 const TITLE_END = /[.!?…:;]$/;
 
 /**

@@ -155,6 +155,7 @@ test('body без секций — одна глава', async () => {
 test('разметка текста: курсив, жирный, style, подзаголовки, стих, цитата, таблица; ¶ — по абзацам', async () => {
   const { dir, parts } = await importFile(fb2({ bodies: `<body>${BOOK_TITLE}
 <section><title><p>Разметка</p></title>
+<annotation><p>Аннотация раздела.</p></annotation>
 <p>Слово <emphasis>курсивом</emphasis>, <strong>жирным</strong>, <style name="x">стилем</style>, <strikethrough>зачёркнутым</strikethrough>, H<sub>2</sub>O, <code>код</code> и <a l:href="http://example.com">ссылка</a>.</p>
 <subtitle>Первый подзаголовок</subtitle>
 <p>Между.</p>
