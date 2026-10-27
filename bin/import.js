@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Команда импорта: npm run import -- <файл.epub|файл.pdf> <папка> [--all]
+// Команда импорта: npm run import -- <файл.epub|файл.pdf|файл.fb2|файл.fb2.zip> <папка> [--all]
 // Формат — по содержимому файла. --all (в любом месте) — служебные страницы EPUB не пропускать.
 // Порция (Б-09): npm run import -- --append <файл | -> <папка книги> [--title "…"] [--again]
 // [--book-title "…" --author "…"] — кусок текста становится следующей главой; «-» — стандартный ввод.
@@ -20,7 +20,7 @@ const STDIN = '-';
 
 function usage(note) {
   if (note) console.error(note);
-  console.error(`Как запускать: npm run import -- <файл.epub|файл.pdf> <папка> [${ALL_FLAG}]`);
+  console.error(`Как запускать: npm run import -- <файл.epub|файл.pdf> <папка> [${ALL_FLAG}] — так же файл.fb2 и файл.fb2.zip`);
   console.error(`  кусок в книгу: npm run import -- ${APPEND_FLAG} <файл | -> <папка книги> [--title "…"] [${AGAIN_FLAG}]`);
   console.error(`  первый кусок новой книги: npm run import -- ${APPEND_FLAG} <файл | -> <новая папка> --book-title "…" [--author "…"] [--title "…"]`);
   process.exit(2);

@@ -71,6 +71,46 @@ export function splitDocument({ blocks, notes = [] }) {
 }
 
 /**
+ * Книга одним файлом (Б-13): первый блок — заголовок с названием книги, главы — по
+ * заголовкам внутри. Уровень глав — самый верхний повторяющийся после названия; каждый
+ * заголовок этого уровня или выше начинает главу, текст до первой такой — своя глава.
+ * Глава делится на части как документ-глава (splitDocument); кусок без текста, кроме
+ * заголовков, главой не становится. Сноски у всех глав — из того же документа.
+ * @param {{blocks: Block[], notes?: string[]}} document
+ * @param {string} bookTitle название из метаданных
+ * @returns {Chapter[] | null} правило не подходит — null, главы строятся как обычно
+ */
+export function chaptersByHeadings({ blocks, notes = [] }, bookTitle) {
+  const [first, ...rest] = blocks;
+  if (first?.type !== 'heading' || plain(first.text) !== first.text) return null;
+  if (!sameTitle(first.text, bookTitle)) return null;
+  const chapterLevel = repeatedTopLevel(rest);
+  if (chapterLevel === null) return null;
+
+  const isChapterStart = (block) => block.type === 'heading' && block.level <= chapterLevel;
+  const pieces = [];
+  let start = 0;
+  while (start < rest.length) {
+    let end = start + 1;
+    while (end < rest.length && !isChapterStart(rest[end])) end += 1;
+    pieces.push(rest.slice(start, end));
+    start = end;
+  }
+  const chapters = pieces
+    .filter((piece) => piece.some((block) => block.type === 'text' && HAS_TEXT.test(block.text)))
+    .map((piece) => splitDocument({ blocks: piece, notes }));
+  return chapters.length > 0 ? chapters : null;
+}
+
+// Название по буквам и цифрам без учёта регистра: одно содержит другое. Пустое — не название.
+function sameTitle(heading, bookTitle) {
+  const letters = (text) => text.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
+  const a = letters(heading);
+  const b = letters(bookTitle);
+  return a !== '' && b !== '' && (a.includes(b) || b.includes(a));
+}
+
+/**
  * Глава из нескольких документов: часть — свой документ и, если есть, его продолжения
  * (документы без своего заголовка в структуре книги). EPUB так собирает часть книги
  * из оглавления, где её главы — отдельные файлы.
@@ -108,8 +148,15 @@ export function joinChapter(title, sections) {
   return { title, parts };
 }
 
-// Тексты блоков части в markdown → файл части: блоки через пустую строку, сноски — в конце.
-function renderPart(kind, title, texts, notes) {
+/**
+ * Тексты блоков части в markdown → файл части: блоки через пустую строку, сноски — в конце.
+ * @param {Part['kind']} kind
+ * @param {string} title
+ * @param {string[]} texts
+ * @param {string[]} notes тексты сносок для меток в texts
+ * @returns {Part}
+ */
+export function renderPart(kind, title, texts, notes) {
   const { texts: numbered, definitions } = numberMarks(texts, notes);
   const body = numbered.join('\n\n');
   const markdown = definitions.length > 0 ? `${body}\n\n${definitions.join('\n')}\n` : `${body}\n`;

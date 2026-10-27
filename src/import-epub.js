@@ -3,7 +3,7 @@
 import { readEpub } from './epub.js';
 import { readInput } from './input.js';
 import { blocksWithoutFootnotes, documentsToBlocks, htmlToBlocks } from './html-to-blocks.js';
-import { buildChapters, fallbackTitle } from './chapters.js';
+import { buildChapters, chaptersByHeadings, fallbackTitle } from './chapters.js';
 import { frontMatterReasons } from './front-matter.js';
 import { chaptersByToc } from './epub-toc.js';
 import { planBook } from './layout.js';
@@ -72,7 +72,9 @@ export async function importEpubData(data, outDir, { all = false } = {}) {
     skipped = [...skipped, ...more].sort((a, b) => a.index - b.index);
   } else {
     if (byToc?.warning) warnings.push(byToc.warning);
-    chapters = buildChapters(kept);
+    // Книга одним файлом с названием в начале (Б-13) — главы по заголовкам внутри.
+    const byHeadings = kept.length === 1 ? chaptersByHeadings(kept[0], book.metadata.title) : null;
+    chapters = byHeadings ?? buildChapters(kept);
   }
   skipped = skipped.map(({ file, start, reason }) => ({ file, start, reason }));
   if (chapters.length === 0 && skipped.some((page) => page.reason !== EMPTY_REASON)) {

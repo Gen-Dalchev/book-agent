@@ -248,13 +248,15 @@ function refinedRoles(metas = []) {
   };
 }
 
-function readYear(dates = []) {
+/** Год издания из дат (элементы dc:date или строки); явно ненастоящий — ''. */
+export function readYear(dates = []) {
   const date = dates.find((element) => element?.['@_event'] === 'publication') ?? dates[0];
   const year = textOf(date).match(/\d{4}/)?.[0];
   return year && Number(year) >= MIN_YEAR ? year : '';
 }
 
-function readIsbns(identifiers) {
+/** Настоящие ISBN (верная контрольная цифра) из строк, без повторов и префикса isbn:. */
+export function readIsbns(identifiers) {
   const seen = new Set();
   const isbns = [];
   for (const raw of identifiers) {
