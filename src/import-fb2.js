@@ -13,9 +13,9 @@ import { ImportError } from './errors.js';
  */
 export async function importFb2Data(data, outDir) {
   const book = readFb2(data);
-  const chapters = fb2Chapters(book.bodies);
+  const { chapters, skipped } = fb2Chapters(book.bodies, book.notes);
   if (chapters.length === 0) throw new ImportError('В книге FB2 не нашлось текста.');
-  const plan = planBook({ metadata: book.metadata, chapters });
+  const plan = planBook({ metadata: book.metadata, chapters, skipped });
   await writeFiles(outDir, plan.files);
   return { title: book.metadata.title, chapterCount: plan.chapterCount, partCount: plan.partCount, warnings: [] };
 }

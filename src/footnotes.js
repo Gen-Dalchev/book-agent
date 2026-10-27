@@ -24,13 +24,18 @@ const WRAPPERS = new Set(['section', 'div', 'aside', 'footer', 'ol', 'ul']);
 const URL_SCHEME = /^[a-z][a-z0-9+.-]*:/i;
 
 /** Метка сноски номер id в тексте блока. */
-function markFor(id) {
+export function markFor(id) {
   const digits = [...String(id)].map((digit) => String.fromCharCode(DIGIT_BASE + Number(digit)));
   return `${MARK_OPEN}${digits.join('')}${MARK_CLOSE}`;
 }
 
 function markId(digits) {
   return Number([...digits].map((char) => char.charCodeAt(0) - DIGIT_BASE).join(''));
+}
+
+/** Номера меток в тексте блока по порядку. */
+export function markIds(text) {
+  return [...text.matchAll(MARK)].map(([, , digits]) => markId(digits));
 }
 
 /**
