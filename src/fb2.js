@@ -1,10 +1,18 @@
 // Чтение FB2 (XML FictionBook 2): байты → текст по кодировке из пролога → дерево XML →
 // данные издания из description и тела книги (body) секциями с текстом в markdown.
 // Главы из секций собирает fb2-chapters.js. Картинки, аннотация и оформление не читаются.
+//
+// Сноски (Б-15): ссылка из основного body на секцию body примечаний становится меткой
+// (footnotes.js) ещё в дереве, до превращения в блоки; секция-примечание помечена номером
+// метки, а уходит ли она из примечаний, решает fb2-chapters.js.
 import JSZip from 'jszip';
 import { XMLParser, XMLValidator } from 'fast-xml-parser';
 import { readIsbns, readYear } from './epub.js';
+import { markFor, plain } from './footnotes.js';
 import { ImportError } from './errors.js';
+
+/** Имена body с примечаниями; основной body — первый без такого имени. */
+export const NOTES_BODIES = new Set(['notes', 'comments']);
 
 const UTF8_BOM = [0xef, 0xbb, 0xbf];
 const PROLOG = /^\s*<\?xml\b[^>]*?\bencoding\s*=\s*["']([^"']+)["']/;
@@ -30,7 +38,8 @@ const xmlParser = new XMLParser({
 const XML_SPACE = /[ \t\n\r]+/g;
 const EDGE_SPACE = /^ +| +$/g;
 const HAS_TEXT = /[\p{L}\p{N}]/u;
-// Остальные строчные (strikethrough, sub, sup, style, a) — только текст: сноски — #46.
+// Остальные строчные (strikethrough, sub, sup, style, a) — только текст; ссылка-сноска
+// к этому времени уже заменена меткой (linkNotes).
 const MARKERS = { emphasis: '*', strong: '**', code: '`' };
 // Не импортируются (Б-14): картинки, аннотация — и у книги, и у раздела.
 const NOTHING = new Set(['image', 'empty-line', 'binary', 'annotation']);
@@ -45,13 +54,15 @@ const TITLE_END = /[.!?…:;]$/;
  * Содержимое секции или тела книги по порядку: блок текста в markdown (абзац, цитата,
  * строфа, таблица — один абзац; heading — подзаголовок, в части — «### …») или вложенная секция.
  * @typedef {{type: 'text' | 'heading', text: string} | Section} Item
- * @typedef {{type: 'section', title: string | null, items: Item[]}} Section
+ * @typedef {{type: 'section', title: string | null, items: Item[], noteId?: number}} Section
+ *   noteId — секция-примечание, на которую ведёт сноска: номер её метки
  * @typedef {{name: string | null, title: string | null, items: Item[]}} Body
  */
 
 /**
  * @param {Uint8Array} data содержимое файла .fb2
- * @returns {{metadata: import('./epub.js').Metadata, bodies: Body[]}} bodies — по порядку файла
+ * @returns {{metadata: import('./epub.js').Metadata, bodies: Body[], notes: string[]}}
+ *   bodies — по порядку файла; notes — тексты сносок, номер метки — индекс
  */
 export function readFb2(data) {
   const xml = decode(data);
@@ -64,15 +75,75 @@ export function readFb2(data) {
   if (!root) throw new ImportError('FB2 не разобрался: в файле нет элемента FictionBook.');
 
   const description = child(root, 'description');
-  const bodies = children(root, 'body').map((body) => {
+  const bodyNodes = children(root, 'body');
+  const { notes, noteIds } = linkNotes(bodyNodes);
+  const bodies = bodyNodes.map((body) => {
     const title = child(body, 'title');
     return {
       name: body.attrs.name ?? null,
       title: title ? titleText(title) : null,
-      items: contentItems(body.children.filter((node) => node !== title)),
+      items: contentItems(body.children.filter((node) => node !== title), noteIds),
     };
   });
-  return { metadata: readMetadata(description), bodies };
+  return { metadata: readMetadata(description), bodies, notes };
+}
+
+/**
+ * Ссылка из основного body (`<a l:href="#id">`, префикс и type — любые) на секцию любой глубины
+ * в body примечаний → метка вместо ссылки, прямо в дереве. Ссылки в других body, на id, которого
+ * в примечаниях нет, и наружу остаются текстом; примечание без текста — не сноска.
+ * @param {Node[]} bodies все body по порядку файла
+ * @returns {{notes: string[], noteIds: Map<Node, number>}} notes — тексты сносок, номер метки — индекс;
+ *   noteIds — секция-примечание → номер её метки
+ */
+function linkNotes(bodies) {
+  const targets = new Map();
+  for (const body of bodies.filter((node) => NOTES_BODIES.has(node.attrs.name))) {
+    for (const element of elements(body)) {
+      const { id } = element.attrs;
+      if (element.name === 'section' && id && !targets.has(id)) targets.set(id, element);
+    }
+  }
+  const notes = [];
+  const noteIds = new Map();
+  const visit = (node, skip = null) => {
+    node.children.forEach((item, index) => {
+      if (item === skip || 'text' in item || NOTHING.has(item.name)) return;
+      const href = item.name === 'a' ? item.attrs.href ?? '' : '';
+      const section = href.startsWith('#') ? targets.get(href.slice(1)) : undefined;
+      if (section && !noteIds.has(section)) {
+        const text = noteText(section);
+        if (text) {
+          noteIds.set(section, notes.length);
+          notes.push(text);
+        }
+      }
+      if (noteIds.has(section)) node.children[index] = { text: markFor(noteIds.get(section)) };
+      else visit(item);
+    });
+  };
+  const main = bodies.find((node) => !NOTES_BODIES.has(node.attrs.name));
+  // Название книги в части не идёт — ссылка в нём сноской не становится.
+  if (main) visit(main, child(main, 'title'));
+  return { notes, noteIds };
+}
+
+// Все элементы внутри узла, по порядку файла.
+function elements(node) {
+  return node.children.flatMap((item) => ('text' in item ? [] : [item, ...elements(item)]));
+}
+
+// Текст примечания одной строкой: секция без своего title (номера); абзацы, строки стихов
+// и вложенные секции — через пробел, курсив и жирный — как в абзацах.
+function noteText(section) {
+  const title = child(section, 'title');
+  const lines = (items) => items.flatMap((item) => (item.type === 'section'
+    ? [...(item.title ? [item.title] : []), ...lines(item.items)] : [item.text]));
+  return lines(contentItems(section.children.filter((node) => node !== title)))
+    .join(' ')
+    .replace(/ *\n */g, ' ')
+    .replace(/ {2,}/g, ' ')
+    .trim();
 }
 
 /**
@@ -170,13 +241,17 @@ function titleText(title) {
     return HAS_TEXT.test(text) ? text : null;
   }
   return lines.reduce((joined, line) => {
-    const bare = joined.replace(/[*`]+$/, '');
+    const bare = plain(joined).replace(/[*`]+$/, '');
     return `${joined}${TITLE_END.test(bare) ? ' ' : '. '}${line}`;
   });
 }
 
-/** Дети секции или тела книги → Item[]: секции — вложенными, остальное — блоками. */
-function contentItems(nodes) {
+/**
+ * Дети секции или тела книги → Item[]: секции — вложенными, остальное — блоками.
+ * @param {Node[]} nodes
+ * @param {Map<Node, number>} [noteIds] секция-примечание → номер её метки (linkNotes)
+ */
+function contentItems(nodes, noteIds = new Map()) {
   const items = [];
   for (const node of nodes) {
     if ('text' in node) {
@@ -185,10 +260,12 @@ function contentItems(nodes) {
       if (text) items.push({ type: 'text', text });
     } else if (node.name === 'section') {
       const title = child(node, 'title');
+      const noteId = noteIds.get(node);
       items.push({
         type: 'section',
         title: title ? titleText(title) : null,
-        items: contentItems(node.children.filter((item) => item !== title)),
+        items: contentItems(node.children.filter((item) => item !== title), noteIds),
+        ...(noteId === undefined ? {} : { noteId }),
       });
     } else {
       items.push(...blocks(node));

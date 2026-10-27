@@ -214,6 +214,69 @@ test('основной body — первый без name notes/comments, даж�
   assert.deepEqual(parts, { '001': '# Глава\n\nТекст.\n', '002': '### 1\n\nПримечание.\n' });
 });
 
+const NOTES_SKIPPED = 'примечания — разнесены по частям';
+
+test('сноски: метка в абзаце, определения в конце части, номера свои в каждой части; xlink и l, без type', async () => {
+  const { index, parts } = await importFile(fb2({ bodies: `<body>${BOOK_TITLE}
+<section><title><p>Первая</p></title>
+  <section><title><p>Раздел А</p></title><p>Слово <a l:href="#n1" type="note">[1]</a> и ещё<a l:href="#n2">2</a>, снова <sup><a l:href="#n1">[1]</a></sup>.</p></section>
+  <section><title><p>Раздел Б</p></title><p>Там <a xmlns:xlink="http://www.w3.org/1999/xlink" xlink:href="#n2">2</a>.</p></section>
+</section>
+<section><title><p>Вторая</p></title><p>Без сносок.</p></section></body>
+<body name="notes"><title><p>Примечания</p></title>
+<section id="n1"><title><p>1</p></title><p>Первое <emphasis>примечание</emphasis>.</p></section>
+<section id="n2"><title><p>2</p></title><p>Второе.</p></section></body>` }));
+  assert.deepEqual(parts, {
+    '001-01': '# Первая\n\n## Раздел А\n\nСлово[^1] и ещё[^2], снова[^1].\n\n[^1]: Первое *примечание*.\n[^2]: Второе.\n',
+    '001-02': '## Раздел Б\n\nТам[^1].\n\n[^1]: Второе.\n',
+    '002': '# Вторая\n\nБез сносок.\n',
+  });
+  assert.match(index, /^- Глав: 2\n- Частей: 3\n- Сносок: 3$/m);
+  assert.match(index, /## Пропущено\n\n\| Файл \| Начало \| Причина \|\n\| --- \| --- \| --- \|\n\| body:notes \| Примечания \| примечания — разнесены по частям \|\n$/);
+});
+
+test('сноска в заголовке — метка в «#», в book.md без неё; ссылка на чужой id и наружу — текст; примечание без ссылки остаётся', async () => {
+  const { dir, index, parts } = await importFile(fb2({ bodies: `<body>${BOOK_TITLE}
+<section><title><p>Глава<a l:href="#t">*</a></p></title>
+  <p>Нет <a l:href="#none">3</a>, внутри <a l:href="#inner">сюда</a>, наружу <a l:href="http://example.com/#t">сайт</a>, на абзац <a l:href="#pn">4</a>.</p>
+  <section id="inner"><p>Вложенная.</p></section>
+</section></body>
+<body name="notes"><title><p>Примечания</p></title>
+<section id="t"><title><p>*</p></title><p>Сноска к заголовку.</p></section>
+<section id="free"><title><p>2</p></title><p id="pn">Без ссылки.</p></section></body>` }));
+  assert.deepEqual(parts, {
+    '001-00': '# Глава[^1]\n\nНет 3, внутри сюда, наружу сайт, на абзац 4.\n\n[^1]: Сноска к заголовку.\n',
+    '001-01': 'Вложенная.\n',
+    '002': '# Примечания\n\n### 2\n\nБез ссылки.\n',
+  });
+  assert.match(index, /^\| 001 \| Глава \| — \| \d+ \|$/m);
+  assert.match(index, /^- Сносок: 1$/m);
+  assert.doesNotMatch(index, /Пропущено|\[\^|/);
+
+  // Сноски не сдвигают ¶: определения — не абзацы.
+  const shown = run(SHOW, dir, '001-00 ¶1');
+  assert.equal(shown.status, 0, shown.stderr);
+  assert.equal(shown.stdout, '¶1 Нет 3, внутри сюда, наружу сайт, на абзац 4.\n');
+});
+
+test('примечания по главам, из нескольких абзацев и со стихом; ссылка между примечаниями — текстом', async () => {
+  const { index, parts } = await importFile(fb2({ bodies: `<body>${BOOK_TITLE}
+<section><title><p>Глава</p></title><p>Раз<a l:href="#c1n1">1</a>, два<a l:href="#c2n1">1</a>.</p></section></body>
+<body name="comments"><title><p>Комментарии</p></title>
+<section><title><p>Глава первая</p></title>
+  <section id="c1n1"><title><p>1</p></title><p>Абзац один.</p><p>Абзац <strong>два</strong>, см. <a l:href="#c2n1">ниже</a>.</p>
+    <poem><stanza><v>Строка стиха,</v><v>вторая.</v></stanza></poem></section>
+</section>
+<section><title><p>Глава вторая</p></title>
+  <section id="c2n1"><title><p>1</p></title><p>Другое.</p></section>
+</section></body>` }));
+  assert.deepEqual(parts, {
+    '001': '# Глава\n\nРаз[^1], два[^2].\n\n[^1]: Абзац один. Абзац **два**, см. ниже. Строка стиха, вторая.\n[^2]: Другое.\n',
+  });
+  assert.match(index, /^- Глав: 1\n- Частей: 1\n- Сносок: 2$/m);
+  assert.match(index, new RegExp(`^\\| body:comments \\| Комментарии \\| ${NOTES_SKIPPED} \\|$`, 'm'));
+});
+
 test('windows-1251: текст и данные издания без кракозябр', async () => {
   const xml = fb2({
     encoding: 'windows-1251',
