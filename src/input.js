@@ -7,7 +7,7 @@ import { ImportError } from './errors.js';
  * @param {string} [wanted] что за файл нужен — для ошибки, если указана папка
  * @returns {Promise<Uint8Array>}
  */
-export async function readInput(inputPath, wanted = 'файл книги (.epub или .pdf)') {
+export async function readInput(inputPath, wanted = 'файл книги (.epub, .pdf или .fb2)') {
   try {
     return await readFile(inputPath);
   } catch (error) {

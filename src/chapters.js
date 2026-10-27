@@ -148,8 +148,15 @@ export function joinChapter(title, sections) {
   return { title, parts };
 }
 
-// Тексты блоков части в markdown → файл части: блоки через пустую строку, сноски — в конце.
-function renderPart(kind, title, texts, notes) {
+/**
+ * Тексты блоков части в markdown → файл части: блоки через пустую строку, сноски — в конце.
+ * @param {Part['kind']} kind
+ * @param {string} title
+ * @param {string[]} texts
+ * @param {string[]} notes тексты сносок для меток в texts
+ * @returns {Part}
+ */
+export function renderPart(kind, title, texts, notes) {
   const { texts: numbered, definitions } = numberMarks(texts, notes);
   const body = numbered.join('\n\n');
   const markdown = definitions.length > 0 ? `${body}\n\n${definitions.join('\n')}\n` : `${body}\n`;
