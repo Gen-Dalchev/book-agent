@@ -5,14 +5,15 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import SevenZip from '7z-wasm';
 import { ImportError } from './errors.js';
+import { detectFormat, ZIP_SIGNATURES } from './format.js';
 import { ensureEmptyDir } from './write.js';
 
 const SIGNATURES = {
-  zip: [[0x50, 0x4b, 0x03, 0x04], [0x50, 0x4b, 0x05, 0x06]],
+  zip: ZIP_SIGNATURES,
   '7z': [[0x37, 0x7a, 0xbc, 0xaf, 0x27, 0x1c]],
   rar: [[0x52, 0x61, 0x72, 0x21, 0x1a, 0x07]],
 };
-// Файлы, которые импорт берёт как книгу (`.fb2.zip` — после импорта FB2).
+// Файлы, которые импорт берёт как книгу (`.fb2.zip` — FB2 в zip, Б-14).
 const BOOK_EXTENSIONS = ['.epub', '.pdf', '.fb2', '.fb2.zip'];
 // Пароль-заглушка: без него 7-Zip ждал бы ввода; у архива без пароля он ни на что не влияет.
 const NO_PASSWORD = '-pnone';
@@ -39,7 +40,8 @@ export function isBookFile(name) {
 /**
  * @param {Uint8Array} data содержимое архива
  * @param {string} outDir папка: не должна существовать или должна быть пустой
- * @returns {Promise<{kind: string, files: {path: string, size: number}[]}>} пути — относительно outDir, через «/»
+ * @returns {Promise<{kind: string, files: {path: string, size: number, book: boolean}[]}>}
+ *   пути — относительно outDir, через «/»; book — файл книги по имени или по содержимому (PDF, FB2)
  */
 export async function unpackArchive(data, outDir) {
   const kind = detectArchive(data);
@@ -50,13 +52,19 @@ export async function unpackArchive(data, outDir) {
   const sevenZip = await SevenZip({ print: () => {}, printErr: (line) => messages.push(line) });
   sevenZip.FS.writeFile(IN, data);
   let code;
+  // 7-Zip ставит свой код выхода в process.exitCode — код процесса решает вызывающий, а не он.
+  const exitCode = process.exitCode;
   try {
     code = sevenZip.callMain(['x', IN, `-o${OUT}`, '-y', NO_PASSWORD, '-bso0', '-bsp0']);
-  } catch {
-    // 7-Zip падает целиком на архивах с зашифрованным оглавлением.
+  } catch (error) {
+    // Исключение C++ внутри 7-Zip приходит числом: обрезанный архив, зашифрованное оглавление.
+    if (typeof error !== 'number') throw error;
     throw new ImportError('Архив не открылся: он повреждён или защищён паролем. Ничего не записано.');
+  } finally {
+    process.exitCode = exitCode;
   }
   if (code !== 0) {
+    // Сюда же — архив со ссылкой наружу («Dangerous link path»): 7-Zip считает его ошибкой целиком.
     const reason = messages.map((line) => line.trim()).filter(Boolean).join(' ');
     const password = /wrong password/i.test(reason) ? ' Похоже, архив защищён паролем.' : '';
     throw new ImportError(`Архив не распаковался: ${reason || `код ${code}`}.${password} Ничего не записано.`);
@@ -68,20 +76,23 @@ export async function unpackArchive(data, outDir) {
     throw new ImportError('Это EPUB, а не архив с книгой: импортируйте файл как есть, без распаковки. Ничего не записано.');
   }
 
+  // Пути из памяти 7-Zip уже без «..» и корня; проверка — на случай, если это когда-нибудь изменится.
   const root = path.resolve(outDir);
-  for (const file of files) {
-    const target = path.resolve(root, ...file.path.split('/'));
-    if (!target.startsWith(root + path.sep)) {
-      throw new ImportError(`Путь в архиве выходит за папку: ${file.path}. Ничего не записано.`);
-    }
-  }
+  const targets = files.map((file) => path.resolve(root, ...file.path.split('/')));
+  const outside = files.find((file, index) => !targets[index].startsWith(root + path.sep));
+  if (outside) throw new ImportError(`Путь в архиве выходит за папку: ${outside.path}. Ничего не записано.`);
+
   await mkdir(root, { recursive: true });
-  for (const file of files) {
-    const target = path.resolve(root, ...file.path.split('/'));
-    await mkdir(path.dirname(target), { recursive: true });
-    await writeFile(target, sevenZip.FS.readFile(`${OUT}/${file.path}`), { flag: 'wx' });
+  const result = [];
+  for (const [index, file] of files.entries()) {
+    const content = sevenZip.FS.readFile(`${OUT}/${file.path}`);
+    await mkdir(path.dirname(targets[index]), { recursive: true });
+    await writeFile(targets[index], content, { flag: 'wx' });
+    // Имя в zip не в UTF-8 (cp866 старых архиваторов) приходит искажённым, без расширения, — книгу узнаём по содержимому.
+    const book = isBookFile(file.path) || ['pdf', 'fb2'].includes(detectFormat(content));
+    result.push({ path: file.path, size: file.size, book });
   }
-  return { kind, files: files.map(({ path: filePath, size }) => ({ path: filePath, size })) };
+  return { kind, files: result };
 }
 
 // Обычные файлы распакованного дерева по порядку имён; ссылки и прочее не переносятся.

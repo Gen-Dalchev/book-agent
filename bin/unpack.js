@@ -2,7 +2,7 @@
 // Команда распаковки: npm run unpack -- <архив.zip|архив.7z|архив.rar> <папка>
 // Архив с книгой (большой PDF и пр.) — в новую или пустую папку; дальше — импорт книги из неё (Б-18).
 import path from 'node:path';
-import { unpackArchive, isBookFile } from '../src/unpack.js';
+import { unpackArchive } from '../src/unpack.js';
 import { readInput } from '../src/input.js';
 import { ImportError } from '../src/errors.js';
 
@@ -21,10 +21,11 @@ try {
   const result = await unpackArchive(data, output);
   console.log(`Готово: ${result.kind}, файлов: ${result.files.length}.`);
   for (const file of result.files) {
-    console.log(`${isBookFile(file.path) ? 'книга' : '     '}  ${path.join(output, ...file.path.split('/'))}  ${formatSize(file.size)}`);
+    console.log(`${file.book ? 'книга' : '     '}  ${path.join(output, ...file.path.split('/'))}  ${formatSize(file.size)}`);
   }
-  const books = result.files.filter((file) => isBookFile(file.path));
-  if (books.length === 0) console.error('Предупреждение: в архиве нет файла книги (.epub, .pdf, .fb2).');
+  if (!result.files.some((file) => file.book)) {
+    console.error('Предупреждение: в архиве нет файла книги (.epub, .pdf, .fb2, .fb2.zip).');
+  }
 } catch (error) {
   if (error instanceof ImportError) {
     console.error(`Ошибка: ${error.message}`);

@@ -61,8 +61,8 @@ test('zip: файлы с папками — в новую папку, байт �
     const result = await unpackArchive(data, out);
     assert.equal(result.kind, 'zip');
     assert.deepEqual(result.files, [
-      { path: 'readme.txt', size: Buffer.byteLength('прочти меня') },
-      { path: 'Книги/Книга.pdf', size: PDF_BYTES.length },
+      { path: 'readme.txt', size: Buffer.byteLength('прочти меня'), book: false },
+      { path: 'Книги/Книга.pdf', size: PDF_BYTES.length, book: true },
     ]);
     assert.deepEqual(await readFile(path.join(out, 'Книги', 'Книга.pdf')), PDF_BYTES);
     assert.equal(await readFile(path.join(out, 'readme.txt'), 'utf8'), 'прочти меня');
@@ -77,8 +77,22 @@ test('7z — в пустую папку', async () => {
     const data = await build7z({ 'книга.pdf': PDF_BYTES });
     const result = await unpackArchive(data, dir);
     assert.equal(result.kind, '7z');
-    assert.deepEqual(result.files, [{ path: 'книга.pdf', size: PDF_BYTES.length }]);
+    assert.deepEqual(result.files, [{ path: 'книга.pdf', size: PDF_BYTES.length, book: true }]);
     assert.deepEqual(await readFile(path.join(dir, 'книга.pdf')), PDF_BYTES);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('книга без расширения (имя не в UTF-8 приходит искажённым) — по содержимому: PDF и FB2', async () => {
+  const dir = await tempDir();
+  try {
+    const fb2 = '<?xml version="1.0" encoding="utf-8"?>\n<FictionBook xmlns="http://www.gribuser.ru/xml/fictionbook/2.0"></FictionBook>';
+    const data = await buildZip({ 'книга-без-расширения': PDF_BYTES, 'ещё': fb2, 'опись.txt': 'текст' });
+    const result = await unpackArchive(data, dir);
+    assert.deepEqual(result.files.map((file) => [file.path, file.book]), [
+      ['ещё', true], ['книга-без-расширения', true], ['опись.txt', false],
+    ]);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -115,6 +129,16 @@ test('ошибки: не архив, EPUB, папка с файлами, пар�
     await assert.rejects(unpackArchive(lockedHeaders, out), /паролем/);
 
     await assert.rejects(unpackArchive(await buildZip({}), out), /нет файлов/);
+
+    const whole = await build7z({ 'книга.pdf': PDF_BYTES });
+    await assert.rejects(unpackArchive(whole.subarray(0, whole.length - 20), out), /повреждён|не распаковался/);
+
+    const link = new JSZip();
+    link.file('книга.pdf', PDF_BYTES);
+    link.file('ссылка', '/etc/passwd', { unixPermissions: 0o120777 });
+    const linked = await link.generateAsync({ type: 'nodebuffer', platform: 'UNIX' });
+    await assert.rejects(unpackArchive(linked, out), /Dangerous link/);
+
     await assert.rejects(readdir(out), { code: 'ENOENT' });
 
     await mkdir(out);

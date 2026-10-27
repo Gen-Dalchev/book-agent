@@ -2,7 +2,7 @@
 // может оказаться EPUB и наоборот.
 const PDF_SIGNATURE = '%PDF-';
 // Обычный zip начинается с записи файла (PK 03 04), пустой — с конца каталога (PK 05 06).
-const ZIP_SIGNATURES = [[0x50, 0x4b, 0x03, 0x04], [0x50, 0x4b, 0x05, 0x06]];
+export const ZIP_SIGNATURES = [[0x50, 0x4b, 0x03, 0x04], [0x50, 0x4b, 0x05, 0x06]];
 const UTF8_BOM = [0xef, 0xbb, 0xbf];
 // FB2 — XML, первый элемент которого FictionBook; до него — пролог, комментарии, DOCTYPE.
 const FB2_HEAD = 64 * 1024;
