@@ -75,7 +75,13 @@ export async function appendPiece(data, bookDir, options = {}) {
 
 /** Кусок → файл части: заголовок, абзацы через пустую строку, перевод строки в конце. */
 function buildPiece(data, titleOption) {
-  if (detectFormat(data) !== null) {
+  const format = detectFormat(data);
+  if (format === 'fb2') {
+    throw new ImportError('FB2 порцией не дописывается — импортируйте файл целиком в отдельную папку '
+      + '(npm run import -- <файл> <папка>), а кусок возьмите из её части.');
+  }
+  // Кусок .fb2.zip — тоже zip, ошибка про EPUB и PDF (принятая неточность).
+  if (format !== null) {
     throw new ImportError('EPUB и PDF порцией не дописываются — импортируйте файл целиком в отдельную папку '
       + '(npm run import -- <файл> <папка>), а кусок возьмите из её части.');
   }
